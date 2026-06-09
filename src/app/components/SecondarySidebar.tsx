@@ -152,8 +152,6 @@ const secondaryNavConfig: Record<string, NavSection[]> = {
       { id: 'marketplace', label: 'Marketplace' },
       { id: 'shipping', label: 'Shipping' },
       { id: 'accounting', label: 'Accounting' },
-      { id: 'payments', label: 'Payments' },
-      { id: 'automation', label: 'Automation' },
     ]},
   ],
   '/ai-ops': [

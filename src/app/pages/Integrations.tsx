@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { RefreshCw, Settings, ExternalLink, AlertCircle, Loader2, X, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { RefreshCw, Settings, ExternalLink, AlertCircle, Loader2, X, CheckCircle, Clock, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useOrgQuery, logActivity } from '../../lib/hooks';
 import { useSecondaryView } from '../components/SecondarySidebar';
@@ -10,49 +10,46 @@ const KNOWN_INTEGRATIONS = [
   { id: 'shopify', name: 'Shopify', category: 'Marketplace', description: 'Sync inventory and orders with your Shopify storefront.', initials: 'SH', type: 'oauth' as const },
   { id: 'ebay', name: 'eBay', category: 'Marketplace', description: 'List, manage and sync eBay listings automatically.', initials: 'eB', type: 'oauth' as const },
   { id: 'shipstation', name: 'ShipStation', category: 'Shipping', description: 'Multi-carrier shipping and label management.', initials: 'SS', type: 'credentials' as const },
-  { id: 'quickbooks', name: 'QuickBooks', category: 'Accounting', description: 'Sync revenue, COGS, and expenses to QuickBooks Online.', initials: 'QB', type: 'oauth' as const }
-  ];
+  { id: 'quickbooks', name: 'QuickBooks', category: 'Accounting', description: 'Sync revenue, COGS, and expenses to QuickBooks Online.', initials: 'QB', type: 'oauth' as const },
+];
 
 const categoryMap: Record<string, string> = {
-    marketplace: 'Marketplace',
-    shipping: 'Shipping',
-    accounting: 'Accounting',
+  marketplace: 'Marketplace',
+  shipping: 'Shipping',
+  accounting: 'Accounting',
 };
+
 export function Integrations() {
-    const view = useSecondaryView();
-    const { orgId, user } = useAuth();
+  const view = useSecondaryView();
+  const { orgId, user } = useAuth();
   const [working, setWorking] = useState<string | null>(null);
   const [setupDrawer, setSetupDrawer] = useState<{ provider: string; name: string; type: string } | null>(null);
   const [eventsDrawer, setEventsDrawer] = useState<string | null>(null);
+  const [mappingDrawer, setMappingDrawer] = useState<boolean>(false);
   const [events, setEvents] = useState<any[]>([]);
-  const { data: connections, loading, error, reload } = useOrgQuery(    
+
+  const { data: connections, loading, error, reload } = useOrgQuery(
     'integration_connections', orgId, {
-    select: 'id, provider, status, health, last_sync_at, config, created_at',
-  });
+      select: 'id, provider, status, health, last_sync_at, config, created_at',
+    });
 
   const getConnection = (id: string) => connections.find((c: any) => c.provider === id);
 
   const startOAuth = async (integration: typeof KNOWN_INTEGRATIONS[0], shopDomain?: string) => {
     setWorking(integration.id);
 
-    // Check if organization is loaded
     if (!orgId) {
       alert('Organization is still loading. Try again.');
       setWorking(null);
       return;
     }
 
-    // Warn if user is missing
-    if (!user?.id) {
-      console.warn('Starting OAuth without user_id');
-    }
+    if (!user?.id) console.warn('Starting OAuth without user_id');
 
-    // Build provider-specific payload
     let payload: any = { return_path: '/integrations' };
 
     if (integration.id === 'shopify') {
       if (!shopDomain) {
-        // Open setup drawer to collect shop domain
         setSetupDrawer({ provider: integration.id, name: integration.name, type: 'oauth_input' });
         setWorking(null);
         return;
@@ -60,54 +57,22 @@ export function Integrations() {
       payload.shop = shopDomain;
     }
 
-    console.log('Starting integration OAuth', {
-      provider: integration.id,
-      organization_id: orgId,
-      user_id: user?.id,
-      payload
-    });
-
     try {
       const { data, error } = await supabase.functions.invoke('integration-start', {
-        body: {
-          organization_id: orgId,
-          user_id: user?.id,
-          provider: integration.id,
-          payload,
-        },
+        body: { organization_id: orgId, user_id: user?.id, provider: integration.id, payload },
       });
 
-      console.log('integration-start response', { provider: integration.id, data, error });
-
-      if (error) {
-        console.error('Supabase invoke error:', error);
-        alert(`Failed to start OAuth: ${error.message || 'Unknown error'}`);
-        setWorking(null);
-        return;
-      }
-
-      if (data?.error) {
-        console.error('Integration-start returned error:', data.error);
-        alert(`Failed to start OAuth: ${data.error}`);
-        setWorking(null);
-        return;
-      }
-
+      if (error) { alert(`Failed to start OAuth: ${error.message || 'Unknown error'}`); setWorking(null); return; }
+      if (data?.error) { alert(`Failed to start OAuth: ${data.error}`); setWorking(null); return; }
       if (data?.oauth_url) {
-        console.log('Redirecting to OAuth URL:', data.oauth_url);
         await logActivity(orgId!, user?.id!, `Started ${integration.name} OAuth`, 'integration_connections');
         window.location.href = data.oauth_url;
-        // Don't clear working state - user is leaving page
         return;
       }
 
-      // No oauth_url returned
-      console.error('No oauth_url in response:', data);
       alert('OAuth URL was not returned by integration-start.');
       setWorking(null);
-
     } catch (err: any) {
-      console.error('OAuth start error:', err);
       alert(`Failed to start OAuth: ${err.message || 'Unknown error'}`);
       setWorking(null);
     }
@@ -117,19 +82,12 @@ export function Integrations() {
     setWorking(integration.id);
     try {
       const { data, error } = await supabase.functions.invoke('integration-test', {
-        body: {
-          organization_id: orgId,
-          provider: integration.id,
-          user_id: user?.id,
-        },
+        body: { organization_id: orgId, provider: integration.id, user_id: user?.id },
       });
-
       if (error) throw error;
-
       await logActivity(orgId!, user?.id!, `Tested ${integration.name} connection`, 'integration_connections');
       reload();
     } catch (err: any) {
-      console.error('Test connection error:', err);
       alert(`Connection test failed: ${err.message}`);
     } finally {
       setWorking(null);
@@ -140,19 +98,12 @@ export function Integrations() {
     setWorking(integration.id);
     try {
       const { data, error } = await supabase.functions.invoke('integration-sync', {
-        body: {
-          organization_id: orgId,
-          provider: integration.id,
-          user_id: user?.id,
-        },
+        body: { organization_id: orgId, provider: integration.id, user_id: user?.id },
       });
-
       if (error) throw error;
-
       await logActivity(orgId!, user?.id!, `Synced ${integration.name}`, 'integration_connections');
       reload();
     } catch (err: any) {
-      console.error('Sync error:', err);
       alert(`Sync failed: ${err.message}`);
     } finally {
       setWorking(null);
@@ -161,23 +112,15 @@ export function Integrations() {
 
   const disconnect = async (integration: typeof KNOWN_INTEGRATIONS[0]) => {
     if (!confirm(`Disconnect ${integration.name}? You'll need to re-authenticate to reconnect.`)) return;
-
     setWorking(integration.id);
     try {
       const { data, error } = await supabase.functions.invoke('integration-disconnect', {
-        body: {
-          organization_id: orgId,
-          provider: integration.id,
-          user_id: user?.id,
-        },
+        body: { organization_id: orgId, provider: integration.id, user_id: user?.id },
       });
-
       if (error) throw error;
-
       await logActivity(orgId!, user?.id!, `Disconnected ${integration.name}`, 'integration_connections');
       reload();
     } catch (err: any) {
-      console.error('Disconnect error:', err);
       alert(`Disconnect failed: ${err.message}`);
     } finally {
       setWorking(null);
@@ -187,19 +130,12 @@ export function Integrations() {
   const loadEvents = async (provider: string) => {
     try {
       const { data, error } = await supabase.functions.invoke('integration-events', {
-        body: {
-          organization_id: orgId,
-          provider,
-          user_id: user?.id,
-          limit: 50,
-        },
+        body: { organization_id: orgId, provider, user_id: user?.id, limit: 50 },
       });
-
       if (error) throw error;
       setEvents(data.events ?? []);
       setEventsDrawer(provider);
     } catch (err: any) {
-      console.error('Load events error:', err);
       alert(`Failed to load events: ${err.message}`);
     }
   };
@@ -208,10 +144,7 @@ export function Integrations() {
     ? KNOWN_INTEGRATIONS
     : KNOWN_INTEGRATIONS.filter(i => i.category.toLowerCase() === categoryMap[view]?.toLowerCase());
 
-  const connectedCount = KNOWN_INTEGRATIONS.filter(i => {
-     const conn = getConnection(i.id);
-    return conn?.status === 'CONNECTED';
-  }).length;
+  const connectedCount = KNOWN_INTEGRATIONS.filter(i => getConnection(i.id)?.status === 'CONNECTED').length;
 
   const grouped: Record<string, typeof KNOWN_INTEGRATIONS> = {};
   for (const item of visible) {
@@ -224,11 +157,10 @@ export function Integrations() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">Integrations</h2>
-          {loading ? (
-            <p className="text-[13px] text-gray-400 mt-0.5">Loading...</p>
-          ) : (
-            <p className="text-[13px] text-gray-400 mt-0.5">{connectedCount} of {KNOWN_INTEGRATIONS.length} connected</p>
-          )}
+          {loading
+            ? <p className="text-[13px] text-gray-400 mt-0.5">Loading...</p>
+            : <p className="text-[13px] text-gray-400 mt-0.5">{connectedCount} of {KNOWN_INTEGRATIONS.length} connected</p>
+          }
         </div>
       </div>
 
@@ -240,41 +172,26 @@ export function Integrations() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {items.map(integration => {
               const conn = getConnection(integration.id);
-
               let status = conn?.status ?? 'NOT_CONFIGURED';
               let statusLabel = 'Not Configured';
               let statusColor = 'bg-gray-100 text-gray-500';
 
-                      switch (status) {
-                  case 'CONNECTED':
-                    if (conn?.health === 'DEGRADED') {
-                      statusLabel = 'Error';
-                      statusColor = 'bg-amber-100 text-amber-700';
-                    } else {
-                      statusLabel = 'Connected';
-                      statusColor = 'bg-[#ECFDF5] text-[#15803d]';
-                    }
-                    break;
-                  case 'OAUTH_REQUIRED':
-                    statusLabel = 'OAuth Required';
-                    statusColor = 'bg-amber-50 text-amber-600';
-                    break;
-                  case 'CREDENTIALS_NEEDED':
-                    statusLabel = 'Credentials Needed';
-                    statusColor = 'bg-amber-50 text-amber-600';
-                    break;
-                  case 'DISCONNECTED':
-                    statusLabel = 'Disconnected';
-                    statusColor = 'bg-gray-100 text-gray-500';
-                    break;
-                  case 'ERROR':
-                    statusLabel = 'Error';
-                    statusColor = 'bg-red-100 text-red-700';
-                    break;
-                }
-                         const isConnected = status === 'CONNECTED';
+              switch (status) {
+                case 'CONNECTED':
+                  if (conn?.health === 'DEGRADED') { statusLabel = 'Error'; statusColor = 'bg-amber-100 text-amber-700'; }
+                  else { statusLabel = 'Connected'; statusColor = 'bg-[#ECFDF5] text-[#15803d]'; }
+                  break;
+                case 'OAUTH_REQUIRED': statusLabel = 'OAuth Required'; statusColor = 'bg-amber-50 text-amber-600'; break;
+                case 'CREDENTIALS_NEEDED': statusLabel = 'Credentials Needed'; statusColor = 'bg-amber-50 text-amber-600'; break;
+                case 'DISCONNECTED': statusLabel = 'Disconnected'; statusColor = 'bg-gray-100 text-gray-500'; break;
+                case 'RECONNECT_REQUIRED': statusLabel = 'Reconnect Required'; statusColor = 'bg-red-50 text-red-600'; break;
+                case 'ERROR': statusLabel = 'Error'; statusColor = 'bg-red-100 text-red-700'; break;
+              }
+
+              const isConnected = status === 'CONNECTED';
               const isDegraded = conn?.health === 'DEGRADED';
               const isWorking = working === integration.id;
+              const isQB = integration.id === 'quickbooks';
 
               return (
                 <div key={integration.id}
@@ -291,9 +208,7 @@ export function Integrations() {
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       {isDegraded && <AlertCircle size={11} className="text-amber-500" />}
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusColor}`}>
-                        {statusLabel}
-                      </span>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusColor}`}>{statusLabel}</span>
                     </div>
                   </div>
 
@@ -310,12 +225,30 @@ export function Integrations() {
                   <div className="flex gap-2">
                     {isConnected ? (
                       <>
-                        <button
-                          onClick={() => loadEvents(integration.id)}
-                          className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
-                        >
-                          <Clock size={11} />Events
-                        </button>
+                        {isQB && (
+                          <button
+                            onClick={() => setMappingDrawer(true)}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
+                          >
+                            <Settings size={11} />Map Data
+                          </button>
+                        )}
+                        {!isQB && (
+                          <button
+                            onClick={() => loadEvents(integration.id)}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
+                          >
+                            <Clock size={11} />Events
+                          </button>
+                        )}
+                        {isQB && (
+                          <button
+                            onClick={() => loadEvents(integration.id)}
+                            className="px-2.5 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
+                          >
+                            <Clock size={11} />
+                          </button>
+                        )}
                         <button
                           onClick={() => syncNow(integration)}
                           disabled={isWorking}
@@ -326,7 +259,7 @@ export function Integrations() {
                         <button
                           onClick={() => disconnect(integration)}
                           disabled={isWorking}
-                          className="px-2.5 py-1.5 border border-red-100 rounded-lg text-[11px] text-red-400 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                          className="px-2.5 py-1.5 border border-red-100 rounded-lg text-[11px] text-red-400 hover:bg-red-50 disabled:opacity-60"
                         >
                           Disconnect
                         </button>
@@ -352,11 +285,10 @@ export function Integrations() {
                           </button>
                         )}
                         {conn && (
-                        <button
-                          onClick={() => testConnection(integration)}
+                          <button
+                            onClick={() => testConnection(integration)}
                             disabled={isWorking}
                             className="px-2.5 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-gray-400 hover:bg-gray-50 disabled:opacity-60"
-                            title="Test connection"
                           >
                             {isWorking ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
                           </button>
@@ -371,7 +303,6 @@ export function Integrations() {
         </div>
       ))}
 
-      {/* Setup Drawer */}
       {setupDrawer && (
         <SetupDrawer
           provider={setupDrawer.provider}
@@ -389,7 +320,6 @@ export function Integrations() {
         />
       )}
 
-      {/* Events Drawer */}
       {eventsDrawer && (
         <EventsDrawer
           provider={eventsDrawer}
@@ -398,9 +328,274 @@ export function Integrations() {
           onClose={() => setEventsDrawer(null)}
         />
       )}
+
+      {mappingDrawer && (
+        <QBMappingDrawer
+          orgId={orgId!}
+          userId={user?.id!}
+          onClose={() => setMappingDrawer(false)}
+          onSuccess={() => { setMappingDrawer(false); reload(); }}
+        />
+      )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// QB Mapping Drawer
+// ---------------------------------------------------------------------------
+
+const QB_MAPPING_FIELDS = [
+  { key: 'sales_income_account', label: 'Sales income', description: 'Revenue from LOT sales and orders', section: 'Income & revenue' },
+  { key: 'shipping_income_account', label: 'Shipping income', description: 'Shipping fees charged to customers', section: 'Income & revenue' },
+  { key: 'cogs_account', label: 'Cost of goods sold (COGS)', description: 'Inventory cost at time of sale', section: 'Cost of goods' },
+  { key: 'inventory_asset_account', label: 'Inventory asset', description: 'Balance sheet account for inventory on hand', section: 'Cost of goods' },
+  { key: 'shipping_expense_account', label: 'Shipping expense', description: 'Outbound shipping costs paid by deryv', section: 'Cost of goods' },
+];
+
+const QB_SYNC_FIELDS = [
+  {
+    key: 'sync_frequency',
+    label: 'Sync frequency',
+    description: 'How often deryv pushes data to QuickBooks',
+    options: [
+      { value: 'daily', label: 'Daily' },
+      { value: 'weekly', label: 'Weekly' },
+      { value: 'on_sale', label: 'On sale' },
+    ],
+  },
+  {
+    key: 'transaction_type',
+    label: 'Transaction type',
+    description: 'How sales are recorded in QuickBooks',
+    options: [
+      { value: 'sales_receipt', label: 'Sales receipt' },
+      { value: 'invoice', label: 'Invoice' },
+      { value: 'journal_entry', label: 'Journal entry' },
+    ],
+  },
+];
+
+// Account types we want to surface per mapping field
+const RELEVANT_ACCOUNT_TYPES: Record<string, string[]> = {
+  sales_income_account: ['Income'],
+  shipping_income_account: ['Income'],
+  cogs_account: ['Cost of Goods Sold', 'Expense'],
+  inventory_asset_account: ['Other Current Asset', 'Other Asset'],
+  shipping_expense_account: ['Expense', 'Cost of Goods Sold'],
+};
+
+function QBMappingDrawer({ orgId, userId, onClose, onSuccess }: {
+  orgId: string;
+  userId: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [accounts, setAccounts] = useState<Record<string, { id: string; name: string; subtype: string }[]>>({});
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+
+  // Load existing mapping + QB accounts on mount
+  useState(() => {
+    (async () => {
+      try {
+        // Load existing saved mapping
+        const { data: existing } = await supabase
+          .from('integration_qb_mappings')
+          .select('*')
+          .eq('organization_id', orgId)
+          .maybeSingle();
+
+        if (existing) {
+          const saved: Record<string, string> = {};
+          for (const field of [...QB_MAPPING_FIELDS, ...QB_SYNC_FIELDS]) {
+            if (existing[field.key]) saved[field.key] = existing[field.key];
+          }
+          setMapping(saved);
+          setLastSaved(existing.updated_at ? new Date(existing.updated_at).toLocaleString() : null);
+        }
+
+        // Fetch live QB chart of accounts
+        const { data, error } = await supabase.functions.invoke('integration-qb-accounts', {
+          body: { organization_id: orgId },
+        });
+
+        if (error) throw new Error(error.message);
+        if (data?.error) throw new Error(data.error);
+
+        setAccounts(data.accounts ?? {});
+      } catch (err: any) {
+        setAccountsError(err.message ?? 'Failed to load QuickBooks accounts.');
+      } finally {
+        setLoadingAccounts(false);
+      }
+    })();
+  });
+
+  const getOptionsForField = (fieldKey: string) => {
+    const relevantTypes = RELEVANT_ACCOUNT_TYPES[fieldKey] ?? [];
+    const options: { value: string; label: string }[] = [];
+    for (const type of relevantTypes) {
+      const accts = accounts[type] ?? [];
+      for (const acct of accts) {
+        options.push({ value: acct.id, label: acct.name });
+      }
+    }
+    return options;
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('integration_qb_mappings')
+        .upsert(
+          { organization_id: orgId, ...mapping, updated_at: new Date().toISOString() },
+          { onConflict: 'organization_id' }
+        );
+      if (error) throw error;
+      await logActivity(orgId, userId, 'Updated QuickBooks data mapping', 'integration_qb_mappings');
+      onSuccess();
+    } catch (err: any) {
+      alert(`Failed to save mapping: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Group mapping fields by section
+  const sections = QB_MAPPING_FIELDS.reduce<Record<string, typeof QB_MAPPING_FIELDS>>((acc, f) => {
+    if (!acc[f.section]) acc[f.section] = [];
+    acc[f.section].push(f);
+    return acc;
+  }, {});
+
+  return (
+    <div className="fixed inset-0 bg-black/20 z-50 flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(0,0,0,0.06)]">
+          <div>
+            <h3 className="text-[15px] font-semibold text-gray-900">QuickBooks — Map Data</h3>
+            <p className="text-[12px] text-gray-500 mt-0.5">Match deryv data to your chart of accounts</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+
+          {loadingAccounts && (
+            <div className="flex items-center gap-2 text-[13px] text-gray-400 py-4">
+              <Loader2 size={14} className="animate-spin" />
+              Loading your QuickBooks accounts...
+            </div>
+          )}
+
+          {accountsError && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-[12px] text-red-600">
+              {accountsError} — <button className="underline" onClick={onClose}>Close and reconnect</button> if your token has expired.
+            </div>
+          )}
+
+          {/* Account mapping sections */}
+          {!loadingAccounts && !accountsError && Object.entries(sections).map(([section, fields]) => (
+            <div key={section}>
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">{section}</p>
+              <div className="space-y-3">
+                {fields.map(field => {
+                  const options = getOptionsForField(field.key);
+                  return (
+                    <div key={field.key}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div>
+                          <p className="text-[13px] font-medium text-gray-900">{field.label}</p>
+                          <p className="text-[11px] text-gray-400">{field.description}</p>
+                        </div>
+                      </div>
+                      <select
+                        value={mapping[field.key] ?? ''}
+                        onChange={e => setMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
+                        className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] bg-white"
+                      >
+                        <option value="">— Select account —</option>
+                        {options.map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                        {options.length === 0 && (
+                          <option disabled>No matching accounts found</option>
+                        )}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {/* Sync settings */}
+          {!loadingAccounts && !accountsError && (
+            <div>
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Sync settings</p>
+              <div className="space-y-3">
+                {QB_SYNC_FIELDS.map(field => (
+                  <div key={field.key}>
+                    <p className="text-[13px] font-medium text-gray-900 mb-0.5">{field.label}</p>
+                    <p className="text-[11px] text-gray-400 mb-1">{field.description}</p>
+                    <select
+                      value={mapping[field.key] ?? ''}
+                      onChange={e => setMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] bg-white"
+                    >
+                      <option value="">— Select —</option>
+                      {field.options.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Info note */}
+          <div className="p-3 bg-gray-50 rounded-lg text-[11px] text-gray-500 leading-relaxed">
+            Account names are pulled live from your QuickBooks chart of accounts. Changes here affect future syncs only — existing QuickBooks entries are not modified.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
+          <p className="text-[11px] text-gray-400">
+            {lastSaved ? `Last saved: ${lastSaved}` : 'Not yet saved'}
+          </p>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || loadingAccounts}
+              className="px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[13px] text-white font-medium disabled:opacity-60"
+            >
+              {saving ? 'Saving...' : 'Save mapping'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Setup Drawer (credentials / OAuth input)
+// ---------------------------------------------------------------------------
 
 function SetupDrawer({ provider, name, type, orgId, userId, onClose, onSuccess, onOAuthContinue }: any) {
   const [credentials, setCredentials] = useState<Record<string, string>>({});
@@ -410,20 +605,12 @@ function SetupDrawer({ provider, name, type, orgId, userId, onClose, onSuccess, 
     setSaving(true);
     try {
       const { data, error } = await supabase.functions.invoke('integration-configure', {
-        body: {
-          organization_id: orgId,
-          provider,
-          user_id: userId,
-          credentials,
-        },
+        body: { organization_id: orgId, provider, user_id: userId, credentials },
       });
-
       if (error) throw error;
-
       await logActivity(orgId, userId, `Configured ${name}`, 'integration_connections');
       onSuccess();
     } catch (err: any) {
-      console.error('Configure error:', err);
       alert(`Configuration failed: ${err.message}`);
     } finally {
       setSaving(false);
@@ -433,10 +620,7 @@ function SetupDrawer({ provider, name, type, orgId, userId, onClose, onSuccess, 
   const handleOAuthContinue = () => {
     if (type === 'oauth_input' && provider === 'shopify') {
       const shopDomain = credentials.shop_domain;
-      if (!shopDomain) {
-        alert('Please enter your Shopify store domain');
-        return;
-      }
+      if (!shopDomain) { alert('Please enter your Shopify store domain'); return; }
       onOAuthContinue?.(shopDomain);
     }
   };
@@ -465,140 +649,25 @@ function SetupDrawer({ provider, name, type, orgId, userId, onClose, onSuccess, 
                 className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
                 placeholder="your-store.myshopify.com"
               />
-              <p className="text-[11px] text-gray-500 mt-1">Enter your Shopify store domain (e.g., your-store.myshopify.com)</p>
+              <p className="text-[11px] text-gray-500 mt-1">Enter your Shopify store domain</p>
             </div>
           )}
-
           {type === 'credentials' && provider === 'shipstation' && (
             <>
               <div>
                 <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">API Key</label>
-                <input
-                  type="password"
-                  value={credentials.api_key ?? ''}
-                  onChange={e => setCredentials({ ...credentials, api_key: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Your ShipStation API key"
-                />
+                <input type="password" value={credentials.api_key ?? ''} onChange={e => setCredentials({ ...credentials, api_key: e.target.value })} className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]" placeholder="Your ShipStation API key" />
               </div>
               <div>
                 <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">API Secret</label>
-                <input
-                  type="password"
-                  value={credentials.api_secret ?? ''}
-                  onChange={e => setCredentials({ ...credentials, api_secret: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Your ShipStation API secret"
-                />
-              </div>
-            </>
-          )}
-
-          {type === 'credentials' && provider === 'a2x' && (
-            <>
-              <div>
-                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">API Key</label>
-                <input
-                  type="password"
-                  value={credentials.api_key ?? ''}
-                  onChange={e => setCredentials({ ...credentials, api_key: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Your A2X API key"
-                />
-              </div>
-              <div>
-                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">Organization ID</label>
-                <input
-                  type="text"
-                  value={credentials.organization_id ?? ''}
-                  onChange={e => setCredentials({ ...credentials, organization_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Your A2X organization ID"
-                />
-              </div>
-            </>
-          )}
-
-          {type === 'credentials' && provider === 'gusto' && (
-            <>
-              <div>
-                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">API Token</label>
-                <input
-                  type="password"
-                  value={credentials.api_token ?? ''}
-                  onChange={e => setCredentials({ ...credentials, api_token: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Your Gusto API token"
-                />
-              </div>
-              <div>
-                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">Company ID</label>
-                <input
-                  type="text"
-                  value={credentials.company_id ?? ''}
-                  onChange={e => setCredentials({ ...credentials, company_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Your Gusto company ID"
-                />
-              </div>
-            </>
-          )}
-
-          {type === 'credentials' && provider === 'melio' && (
-            <>
-              <div>
-                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">API Key</label>
-                <input
-                  type="password"
-                  value={credentials.api_key ?? ''}
-                  onChange={e => setCredentials({ ...credentials, api_key: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Your Melio API key"
-                />
-              </div>
-              <div>
-                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">API Secret</label>
-                <input
-                  type="password"
-                  value={credentials.api_secret ?? ''}
-                  onChange={e => setCredentials({ ...credentials, api_secret: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Your Melio API secret"
-                />
-              </div>
-            </>
-          )}
-
-          {type === 'webhook' && provider === 'make' && (
-            <>
-              <div>
-                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">Webhook URL</label>
-                <input
-                  type="url"
-                  value={credentials.webhook_url ?? ''}
-                  onChange={e => setCredentials({ ...credentials, webhook_url: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="https://hook.make.com/..."
-                />
-              </div>
-              <div>
-                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">Webhook Secret</label>
-                <input
-                  type="password"
-                  value={credentials.webhook_secret ?? ''}
-                  onChange={e => setCredentials({ ...credentials, webhook_secret: e.target.value })}
-                  className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
-                  placeholder="Shared secret for webhook verification"
-                />
+                <input type="password" value={credentials.api_secret ?? ''} onChange={e => setCredentials({ ...credentials, api_secret: e.target.value })} className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]" placeholder="Your ShipStation API secret" />
               </div>
             </>
           )}
         </div>
 
         <div className="flex items-center gap-2 px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
-          <button onClick={onClose} className="flex-1 px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
-            Cancel
-          </button>
+          <button onClick={onClose} className="flex-1 px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">Cancel</button>
           <button
             onClick={type === 'oauth_input' ? handleOAuthContinue : handleSave}
             disabled={saving}
@@ -612,10 +681,14 @@ function SetupDrawer({ provider, name, type, orgId, userId, onClose, onSuccess, 
   );
 }
 
+// ---------------------------------------------------------------------------
+// Events Drawer
+// ---------------------------------------------------------------------------
+
 function EventsDrawer({ provider, name, events, onClose }: any) {
   const getEventIcon = (type: string, status: string) => {
-    if (status === 'success') return <CheckCircle size={14} className="text-green-600" />;
-    if (status === 'error') return <AlertTriangle size={14} className="text-red-600" />;
+    if (status === 'success' || status === 'COMPLETED') return <CheckCircle size={14} className="text-green-600" />;
+    if (status === 'error' || status === 'FAILED') return <AlertTriangle size={14} className="text-red-600" />;
     return <Clock size={14} className="text-gray-400" />;
   };
 
@@ -646,14 +719,12 @@ function EventsDrawer({ provider, name, events, onClose }: any) {
                     <div className="mt-0.5">{getEventIcon(event.event_type, event.status)}</div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-medium text-gray-900">{event.event_type.replace(/_/g, ' ')}</p>
-                      {event.error_message && (
-                        <p className="text-[12px] text-red-600 mt-0.5">{event.error_message}</p>
-                      )}
-                      <p className="text-[11px] text-gray-400 mt-1">
-                        {new Date(event.created_at).toLocaleString()}
-                      </p>
+                      {event.error_message && <p className="text-[12px] text-red-600 mt-0.5">{event.error_message}</p>}
+                      <p className="text-[11px] text-gray-400 mt-1">{new Date(event.created_at).toLocaleString()}</p>
                     </div>
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${event.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                      event.status === 'success' || event.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
                       {event.status}
                     </span>
                   </div>
@@ -664,9 +735,7 @@ function EventsDrawer({ provider, name, events, onClose }: any) {
         </div>
 
         <div className="px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
-          <button onClick={onClose} className="w-full px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
-            Close
-          </button>
+          <button onClick={onClose} className="w-full px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">Close</button>
         </div>
       </div>
     </div>
