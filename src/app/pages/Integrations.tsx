@@ -26,6 +26,7 @@ export function Integrations() {
   const [setupDrawer, setSetupDrawer] = useState<{ provider: string; name: string; type: string } | null>(null);
   const [eventsDrawer, setEventsDrawer] = useState<string | null>(null);
   const [mappingDrawer, setMappingDrawer] = useState<boolean>(false);
+  const [ebaySettingsDrawer, setEbaySettingsDrawer] = useState<boolean>(false);
   const [events, setEvents] = useState<any[]>([]);
 
   const { data: connections, loading, error, reload } = useOrgQuery(
@@ -233,6 +234,14 @@ export function Integrations() {
                             <Settings size={11} />Map Data
                           </button>
                         )}
+                        {integration.id === 'ebay' && (
+                          <button
+                            onClick={() => setEbaySettingsDrawer(true)}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
+                          >
+                            <Settings size={11} />Configure
+                          </button>
+                        )}
                         {!isQB && (
                           <button
                             onClick={() => loadEvents(integration.id)}
@@ -337,6 +346,15 @@ export function Integrations() {
           onSuccess={() => { setMappingDrawer(false); reload(); }}
         />
       )}
+
+      {ebaySettingsDrawer && (
+        <EbaySettingsDrawer
+          orgId={orgId!}
+          userId={user?.id!}
+          onClose={() => setEbaySettingsDrawer(false)}
+          onSuccess={() => { setEbaySettingsDrawer(false); reload(); }}
+        />
+      )}
     </div>
   );
 }
@@ -423,7 +441,11 @@ function QBMappingDrawer({ orgId, userId, onClose, onSuccess }: {
           body: { organization_id: orgId },
         });
 
-        if (error) throw new Error(error.message);
+        // Supabase wraps non-2xx responses in error.message — try to get the real message from data
+        if (error) {
+          const friendlyMessage = (data as any)?.error ?? error.message ?? 'Failed to load QuickBooks accounts.';
+          throw new Error(friendlyMessage);
+        }
         if (data?.error) throw new Error(data.error);
 
         setAccounts(data.accounts ?? {});
@@ -499,8 +521,16 @@ function QBMappingDrawer({ orgId, userId, onClose, onSuccess }: {
           )}
 
           {accountsError && (
-            <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-[12px] text-red-600">
-              {accountsError} — <button className="underline" onClick={onClose}>Close and reconnect</button> if your token has expired.
+            <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-[12px] text-red-600 space-y-1.5">
+              <p className="font-medium">Could not load QuickBooks accounts</p>
+              <p className="text-red-500">{
+                accountsError.includes('token') || accountsError.includes('401') || accountsError.includes('auth')
+                  ? 'Your QuickBooks session has expired. Please disconnect and reconnect.'
+                  : accountsError.includes('not found') || accountsError.includes('404')
+                  ? 'No QuickBooks connection found. Please connect QuickBooks first.'
+                  : 'An error occurred fetching your chart of accounts. Try closing and reopening.'
+              }</p>
+              <button className="underline text-red-600" onClick={onClose}>Close</button>
             </div>
           )}
 
@@ -736,6 +766,236 @@ function EventsDrawer({ provider, name, events, onClose }: any) {
 
         <div className="px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
           <button onClick={onClose} className="w-full px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// eBay Settings Drawer
+// ---------------------------------------------------------------------------
+
+function EbaySettingsDrawer({ orgId, userId, onClose, onSuccess }: {
+  orgId: string;
+  userId: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [step, setStep] = useState<'instructions' | 'form'>('instructions');
+
+  useState(() => {
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('integration_connections')
+          .select('config')
+          .eq('organization_id', orgId)
+          .eq('provider', 'ebay')
+          .maybeSingle();
+
+        if (data?.config) {
+          setSettings({
+            fulfillment_policy_id: data.config.fulfillment_policy_id ?? '',
+            payment_policy_id: data.config.payment_policy_id ?? '',
+            return_policy_id: data.config.return_policy_id ?? '',
+            default_category_id: data.config.default_category_id ?? '',
+          });
+          // Skip instructions if already configured
+          if (data.config.fulfillment_policy_id) setStep('form');
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
+  });
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { data: existing } = await supabase
+        .from('integration_connections')
+        .select('config')
+        .eq('organization_id', orgId)
+        .eq('provider', 'ebay')
+        .maybeSingle();
+
+      const { error } = await supabase
+        .from('integration_connections')
+        .update({
+          config: {
+            ...(existing?.config ?? {}),
+            fulfillment_policy_id: settings.fulfillment_policy_id ?? '',
+            payment_policy_id: settings.payment_policy_id ?? '',
+            return_policy_id: settings.return_policy_id ?? '',
+            default_category_id: settings.default_category_id ?? '',
+            policies_configured_at: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('organization_id', orgId)
+        .eq('provider', 'ebay');
+
+      if (error) throw error;
+      await logActivity(orgId, userId, 'Updated eBay business policy settings', 'integration_connections');
+      onSuccess();
+    } catch (err: any) {
+      alert(`Failed to save: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const INSTRUCTIONS = [
+    {
+      step: 1,
+      title: 'Log in to your eBay seller account',
+      detail: 'Go to ebay.com and sign in with your seller account — not your developer account.',
+    },
+    {
+      step: 2,
+      title: 'Open Business Policies',
+      detail: 'Go to My eBay → Account → Business policies, or visit ebay.com/sh/settings/business-policies directly.',
+    },
+    {
+      step: 3,
+      title: 'Create or find your Shipping policy',
+      detail: 'Click the Shipping tab. Create a new policy if you don\'t have one, or click Edit on an existing one. The policy ID appears in the page URL as a long number (e.g. ...policyId=12345678901234).',
+    },
+    {
+      step: 4,
+      title: 'Get your Payment policy ID',
+      detail: 'Click the Payment tab and repeat — copy the policy ID from the URL when editing.',
+    },
+    {
+      step: 5,
+      title: 'Get your Returns policy ID',
+      detail: 'Click the Returns tab and do the same.',
+    },
+    {
+      step: 6,
+      title: 'Enter the IDs below',
+      detail: 'Paste each numeric policy ID into the corresponding field on the next screen.',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/20 z-50 flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(0,0,0,0.06)]">
+          <div>
+            <h3 className="text-[15px] font-semibold text-gray-900">eBay — Configure</h3>
+            <p className="text-[12px] text-gray-500 mt-0.5">
+              {step === 'instructions' ? 'How to find your eBay policy IDs' : 'Enter your eBay business policy IDs'}
+            </p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {loading ? (
+            <div className="flex items-center gap-2 text-[13px] text-gray-400 py-4">
+              <Loader2 size={14} className="animate-spin" />Loading...
+            </div>
+          ) : step === 'instructions' ? (
+            <div className="space-y-4">
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-[12px] text-blue-700 leading-relaxed">
+                eBay requires every listing to have a Shipping, Payment, and Returns policy. These are set up in your eBay seller account and take about 5 minutes to configure.
+              </div>
+              <div className="space-y-3">
+                {INSTRUCTIONS.map(item => (
+                  <div key={item.step} className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-gray-900 text-white text-[11px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">
+                      {item.step}
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-medium text-gray-900">{item.title}</p>
+                      <p className="text-[12px] text-gray-500 mt-0.5 leading-relaxed">{item.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <a
+                href="https://www.ebay.com/sh/settings/business-policies"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-[12px] text-blue-600 hover:underline mt-2"
+              >
+                <ExternalLink size={11} />
+                Open eBay Business Policies
+              </a>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-3 bg-gray-50 rounded-lg text-[12px] text-gray-500 leading-relaxed">
+                Enter the numeric policy IDs from your eBay seller account. Each ID is a long number found in the URL when editing a policy.
+              </div>
+
+              {[
+                { key: 'fulfillment_policy_id', label: 'Shipping policy ID', placeholder: 'e.g. 12345678901234', help: 'From Business Policies → Shipping tab' },
+                { key: 'payment_policy_id', label: 'Payment policy ID', placeholder: 'e.g. 12345678901234', help: 'From Business Policies → Payment tab' },
+                { key: 'return_policy_id', label: 'Returns policy ID', placeholder: 'e.g. 12345678901234', help: 'From Business Policies → Returns tab' },
+                { key: 'default_category_id', label: 'Default eBay category ID (optional)', placeholder: 'e.g. 9355', help: 'Leave blank to use Electronics › Other as default. Find IDs at developer.ebay.com/devzone/xml/docs/reference/ebay/GetCategories.html' },
+              ].map(field => (
+                <div key={field.key}>
+                  <label className="text-[12px] font-medium text-gray-700 mb-1 block">{field.label}</label>
+                  <input
+                    type="text"
+                    value={settings[field.key] ?? ''}
+                    onChange={e => setSettings(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
+                    placeholder={field.placeholder}
+                  />
+                  <p className="text-[11px] text-gray-400 mt-0.5">{field.help}</p>
+                </div>
+              ))}
+
+              <button
+                onClick={() => setStep('instructions')}
+                className="text-[12px] text-blue-600 hover:underline flex items-center gap-1"
+              >
+                ← Back to instructions
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
+          {step === 'instructions' ? (
+            <>
+              <button onClick={onClose} className="px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={() => setStep('form')}
+                className="px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-lg text-[13px] text-white font-medium"
+              >
+                I have my policy IDs →
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={onClose} className="px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || !settings.fulfillment_policy_id || !settings.payment_policy_id || !settings.return_policy_id}
+                className="px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[13px] text-white font-medium disabled:opacity-60"
+              >
+                {saving ? 'Saving...' : 'Save settings'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
