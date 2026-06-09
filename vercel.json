@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/ebay/account-deletion",
+      "destination": "https://byzjsafupehesiwbqkxt.supabase.co/functions/v1/ebay-account-deletion"
+    }
+  ]
+}
