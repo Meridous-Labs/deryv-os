@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Plus, Trash2, Eye, EyeOff, Loader2, Save, Upload, Info } from 'lucide-react';
+import { Plus, Trash2, Eye, EyeOff, Loader2, Save, Upload, Info, Hash } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useOrgQuery, updateRow, deleteRow, logActivity } from '../../lib/hooks';
 import { useSecondaryView } from '../components/SecondarySidebar';
@@ -106,13 +106,20 @@ export function Settings() {
   const [brandingSaved, setBrandingSaved] = useState(false);
   const logoFileRef = useRef<HTMLInputElement>(null);
 
+  // Inventory ID settings
+  const [invForm, setInvForm] = useState({
+    inventory_prefix: (currentOrg as any)?.inventory_prefix ?? 'INV',
+    inventory_seq_start: String((currentOrg as any)?.inventory_seq_start ?? 1),
+  });
+  const [savingInv, setSavingInv] = useState(false);
+  const [invSaved, setInvSaved] = useState(false);
+  const [invError, setInvError] = useState<string | null>(null);
+
   const { data: members, loading: membersLoading, error: membersError, reload: reloadMembers } = useOrgQuery<any>(
-    'organization_members', orgId, {
-      select: 'id, user_id, role, created_at',
-    }
+    'organization_members', orgId, { select: 'id, user_id, role, created_at' }
   );
 
-  const { data: apiKeys, loading: keysLoading, reload: reloadKeys } = useOrgQuery<any>(
+  const { data: apiKeys, loading: keysLoading } = useOrgQuery<any>(
     'integration_connections', orgId, {
       select: 'id, provider, status, created_at, last_sync_at',
       filter: (q: any) => q.eq('status', 'CONNECTED'),
@@ -121,26 +128,19 @@ export function Settings() {
 
   const saveOrgSettings = async () => {
     if (!orgId || !orgForm.name) return;
-    setSavingOrg(true);
-    setOrgSaved(false);
-
-    const { error } = await supabase
-      .from('organizations')
-      .update({
-        name: orgForm.name,
-        slug: orgForm.slug,
-        website: orgForm.website || null,
-        logo_url: orgForm.logo_url || null,
-        industry: orgForm.industry || null,
-      })
-      .eq('id', orgId);
-
+    setSavingOrg(true); setOrgSaved(false);
+    const { error } = await supabase.from('organizations').update({
+      name: orgForm.name,
+      slug: orgForm.slug,
+      website: orgForm.website || null,
+      logo_url: orgForm.logo_url || null,
+      industry: orgForm.industry || null,
+    }).eq('id', orgId);
     if (!error) {
       await logActivity(orgId, user?.id!, 'Organization profile updated', 'organizations', orgId, 'update');
       setOrgSaved(true);
       setTimeout(() => setOrgSaved(false), 2500);
     }
-
     setSavingOrg(false);
   };
 
@@ -159,11 +159,36 @@ export function Settings() {
     setTimeout(() => setBrandingSaved(false), 2500);
   };
 
+  const saveInventorySettings = async () => {
+    if (!orgId) return;
+    setInvError(null);
+    const prefix = invForm.inventory_prefix.trim().toUpperCase();
+    const seqStart = parseInt(invForm.inventory_seq_start);
+    if (!prefix || prefix.length < 1 || prefix.length > 10) {
+      setInvError('Prefix must be 1–10 characters.'); return;
+    }
+    if (!/^[A-Z0-9]+$/.test(prefix)) {
+      setInvError('Prefix can only contain letters and numbers.'); return;
+    }
+    if (isNaN(seqStart) || seqStart < 1) {
+      setInvError('Starting number must be at least 1.'); return;
+    }
+    setSavingInv(true);
+    const { error } = await supabase.from('organizations').update({
+      inventory_prefix: prefix,
+      inventory_seq_start: seqStart,
+    }).eq('id', orgId);
+    setSavingInv(false);
+    if (error) { setInvError(error.message); return; }
+    await logActivity(orgId, user?.id!, 'Inventory ID settings updated', 'organizations', orgId, 'update');
+    setInvSaved(true);
+    setTimeout(() => setInvSaved(false), 2500);
+  };
+
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !orgId) return;
-    setUploadingLogo(true);
-    setLogoUploadError(null);
+    setUploadingLogo(true); setLogoUploadError(null);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -190,9 +215,13 @@ export function Settings() {
     await updateRow('organization_members', memberId, { role: newRole });
   };
 
-  const handleSignOut = async () => {
-    await signOut();
-  };
+  const handleSignOut = async () => { await signOut(); };
+
+  // Live preview of what the next ID will look like
+  const year = new Date().getFullYear().toString().slice(2);
+  const previewPrefix = invForm.inventory_prefix.trim().toUpperCase() || 'INV';
+  const previewSeq = parseInt(invForm.inventory_seq_start) || 1;
+  const previewId = `${previewPrefix}-${year}-${String(previewSeq).padStart(6, '0')}`;
 
   return (
     <div className="p-6 max-w-[860px] space-y-5">
@@ -420,13 +449,10 @@ export function Settings() {
       {view === 'branding' && (
         <Section title="Company Branding">
           <div className="space-y-5">
-            {/* Platform branding notice */}
             <div className="flex items-start gap-2 text-[12px] text-gray-500 bg-gray-50 border border-[rgba(0,0,0,0.07)] px-3 py-2.5 rounded-lg">
               <Info size={13} className="flex-shrink-0 mt-px text-gray-400" />
               <span>Company branding appears on reports, invoices, packing slips, and shipping documents. Platform navigation always displays the deryv logo.</span>
             </div>
-
-            {/* Company Logo */}
             <div>
               <label className="text-[11px] font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Company Logo</label>
               <div className="flex items-center gap-4">
@@ -438,103 +464,113 @@ export function Settings() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  <input
-                    ref={logoFileRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                    className="hidden"
-                    onChange={handleLogoUpload}
-                    disabled={currentRole !== 'admin'}
-                  />
-                  <button
-                    onClick={() => logoFileRef.current?.click()}
-                    disabled={uploadingLogo || currentRole !== 'admin'}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] text-gray-700 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50 disabled:opacity-60 disabled:cursor-default transition-colors"
-                  >
+                  <input ref={logoFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" onChange={handleLogoUpload} disabled={currentRole !== 'admin'} />
+                  <button onClick={() => logoFileRef.current?.click()} disabled={uploadingLogo || currentRole !== 'admin'}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] text-gray-700 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50 disabled:opacity-60 disabled:cursor-default transition-colors">
                     {uploadingLogo ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
                     {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
                   </button>
-                  {logoUploadError && (
-                    <p className="text-[11px] text-red-500">{logoUploadError}</p>
-                  )}
+                  {logoUploadError && <p className="text-[11px] text-red-500">{logoUploadError}</p>}
                   <p className="text-[11px] text-gray-400">PNG, JPG, WebP, or SVG. Uploaded to secure storage.</p>
                 </div>
               </div>
             </div>
-
-            {/* Company Name */}
             <div>
               <label className="text-[11px] font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Company Name</label>
-              <input
-                value={brandingForm.name}
-                onChange={e => setBrandingForm(f => ({ ...f, name: e.target.value }))}
-                disabled={currentRole !== 'admin'}
-                className="w-full max-w-sm px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default"
-                placeholder="Acme Corp"
-              />
+              <input value={brandingForm.name} onChange={e => setBrandingForm(f => ({ ...f, name: e.target.value }))} disabled={currentRole !== 'admin'}
+                className="w-full max-w-sm px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default" placeholder="Acme Corp" />
             </div>
-
-            {/* Primary Color */}
             <div>
               <label className="text-[11px] font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Primary Color</label>
               <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={brandingForm.primary_color || '#3ECF8E'}
-                  onChange={e => setBrandingForm(f => ({ ...f, primary_color: e.target.value }))}
-                  disabled={currentRole !== 'admin'}
-                  className="w-9 h-9 rounded-lg border border-[rgba(0,0,0,0.1)] cursor-pointer disabled:cursor-default p-0.5 bg-white"
-                />
-                <input
-                  value={brandingForm.primary_color}
-                  onChange={e => setBrandingForm(f => ({ ...f, primary_color: e.target.value }))}
-                  disabled={currentRole !== 'admin'}
-                  placeholder="#3ECF8E"
-                  className="w-32 px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] font-mono bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default"
-                />
+                <input type="color" value={brandingForm.primary_color || '#3ECF8E'} onChange={e => setBrandingForm(f => ({ ...f, primary_color: e.target.value }))} disabled={currentRole !== 'admin'}
+                  className="w-9 h-9 rounded-lg border border-[rgba(0,0,0,0.1)] cursor-pointer disabled:cursor-default p-0.5 bg-white" />
+                <input value={brandingForm.primary_color} onChange={e => setBrandingForm(f => ({ ...f, primary_color: e.target.value }))} disabled={currentRole !== 'admin'} placeholder="#3ECF8E"
+                  className="w-32 px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] font-mono bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default" />
               </div>
               <p className="text-[11px] text-gray-400 mt-1.5">Used on printed documents and generated reports.</p>
             </div>
-
-            {/* Support Email */}
             <div>
               <label className="text-[11px] font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Support Email</label>
-              <input
-                type="email"
-                value={brandingForm.support_email}
-                onChange={e => setBrandingForm(f => ({ ...f, support_email: e.target.value }))}
-                disabled={currentRole !== 'admin'}
-                className="w-full max-w-sm px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default"
-                placeholder="support@company.com"
-              />
+              <input type="email" value={brandingForm.support_email} onChange={e => setBrandingForm(f => ({ ...f, support_email: e.target.value }))} disabled={currentRole !== 'admin'}
+                className="w-full max-w-sm px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default" placeholder="support@company.com" />
             </div>
-
-            {/* Website */}
             <div>
               <label className="text-[11px] font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Website</label>
-              <input
-                type="url"
-                value={brandingForm.website}
-                onChange={e => setBrandingForm(f => ({ ...f, website: e.target.value }))}
-                disabled={currentRole !== 'admin'}
-                className="w-full max-w-sm px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default"
-                placeholder="https://www.company.com"
-              />
+              <input type="url" value={brandingForm.website} onChange={e => setBrandingForm(f => ({ ...f, website: e.target.value }))} disabled={currentRole !== 'admin'}
+                className="w-full max-w-sm px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default" placeholder="https://www.company.com" />
             </div>
+            <div className="flex items-center justify-between pt-4 border-t border-[rgba(0,0,0,0.06)]">
+              <div className="flex items-center gap-3">
+                {currentRole !== 'admin' && <p className="text-[12px] text-gray-400">Admin access required to change branding.</p>}
+                {brandingSaved && <span className="text-[12px] text-[#3ECF8E]">Saved</span>}
+              </div>
+              <button onClick={saveBranding} disabled={savingBranding || currentRole !== 'admin'}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+                {savingBranding ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}Save Changes
+              </button>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* Inventory ID Settings */}
+      {view === 'inventory' && (
+        <Section title="Inventory ID Format">
+          <div className="space-y-5">
+            <div className="flex items-start gap-2 text-[12px] text-gray-500 bg-gray-50 border border-[rgba(0,0,0,0.07)] px-3 py-2.5 rounded-lg">
+              <Info size={13} className="flex-shrink-0 mt-px text-gray-400" />
+              <span>Inventory IDs are auto-generated when new items are added. The format is <span className="font-mono font-medium text-gray-700">PREFIX-YY-000001</span>. Changes only affect new items — existing IDs are not altered.</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[11px] font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">ID Prefix</label>
+                <input
+                  value={invForm.inventory_prefix}
+                  onChange={e => setInvForm(f => ({ ...f, inventory_prefix: e.target.value.toUpperCase() }))}
+                  disabled={currentRole !== 'admin'}
+                  maxLength={10}
+                  placeholder="INV"
+                  className="w-full px-3 py-2 text-[13px] font-mono border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default uppercase"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">Letters and numbers only, max 10 characters.</p>
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Starting Number</label>
+                <input
+                  type="number"
+                  value={invForm.inventory_seq_start}
+                  onChange={e => setInvForm(f => ({ ...f, inventory_seq_start: e.target.value }))}
+                  disabled={currentRole !== 'admin'}
+                  min={1}
+                  placeholder="1"
+                  className="w-full px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-default"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">Next item will start from this number.</p>
+              </div>
+            </div>
+
+            {/* Live preview */}
+            <div className="bg-gray-50 border border-[rgba(0,0,0,0.07)] rounded-xl px-4 py-3">
+              <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">Preview</p>
+              <div className="flex items-center gap-2">
+                <Hash size={13} className="text-gray-400" />
+                <span className="font-mono text-[14px] font-semibold text-gray-900">{previewId}</span>
+                <span className="text-[11px] text-gray-400 ml-1">← next item will get this ID</span>
+              </div>
+            </div>
+
+            {invError && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{invError}</p>}
 
             <div className="flex items-center justify-between pt-4 border-t border-[rgba(0,0,0,0.06)]">
               <div className="flex items-center gap-3">
-                {currentRole !== 'admin' && (
-                  <p className="text-[12px] text-gray-400">Admin access required to change branding.</p>
-                )}
-                {brandingSaved && <span className="text-[12px] text-[#3ECF8E]">Saved</span>}
+                {currentRole !== 'admin' && <p className="text-[12px] text-gray-400">Admin access required.</p>}
+                {invSaved && <span className="text-[12px] text-[#3ECF8E]">Saved</span>}
               </div>
-              <button
-                onClick={saveBranding}
-                disabled={savingBranding || currentRole !== 'admin'}
-                className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60"
-              >
-                {savingBranding ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}Save Changes
+              <button onClick={saveInventorySettings} disabled={savingInv || currentRole !== 'admin'}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+                {savingInv ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}Save Changes
               </button>
             </div>
           </div>
@@ -552,8 +588,7 @@ export function Settings() {
               </div>
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#ECFDF5] text-[#15803d]">Active</span>
             </div>
-            <button onClick={handleSignOut}
-              className="w-full mt-2 py-2 border border-red-100 text-[13px] text-red-500 rounded-lg hover:bg-red-50 transition-colors font-medium">
+            <button onClick={handleSignOut} className="w-full mt-2 py-2 border border-red-100 text-[13px] text-red-500 rounded-lg hover:bg-red-50 transition-colors font-medium">
               Sign Out
             </button>
           </div>

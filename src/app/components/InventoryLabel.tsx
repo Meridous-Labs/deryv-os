@@ -50,7 +50,6 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
             padding: '0.07in 0.08in',
             backgroundColor: '#ffffff',
             boxSizing: 'border-box',
-            overflow: 'hidden',
             gap: '0.08in',
             border: '1px solid #e5e7eb',
             fontFamily: 'system-ui, sans-serif',
@@ -62,7 +61,6 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
-            overflow: 'hidden',
             minWidth: 0,
           }}>
             {/* Top: logo or brand */}
@@ -82,16 +80,14 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
 
             {/* Inventory ID — largest, most prominent */}
             <p style={{
-              fontSize: '0.13in',
+              fontSize: '0.1in',
               fontWeight: 700,
               fontFamily: 'monospace',
               color: '#111',
               margin: '0.02in 0 0.01in',
-              letterSpacing: '0.02em',
+              letterSpacing: '0.01em',
               lineHeight: 1,
               whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
             }}>
               {fullInvId}
             </p>
@@ -102,8 +98,6 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
               fontWeight: 600,
               color: '#222',
               margin: 0,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
               lineHeight: 1.2,
             }}>
@@ -175,7 +169,6 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
           boxSizing: 'border-box',
           border: '1px solid #e5e7eb',
           fontFamily: 'system-ui, sans-serif',
-          overflow: 'hidden',
         }}
       >
         {/* Header: logo + org name */}
@@ -286,11 +279,11 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
         <div style={{ display: 'flex', gap: '0.35in', marginBottom: '0.06in', justifyContent: 'center' }}>
           <div style={{ textAlign: 'center' }}>
             <p style={{ fontSize: '0.065in', color: '#aaa', margin: '0 0 0.025in', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Location</p>
-            <p style={{ fontSize: '0.13in', fontWeight: 700, color: '#333', margin: 0, fontFamily: 'monospace' }}>{loc}</p>
+            <p style={{ fontSize: '0.1in', fontWeight: 700, color: '#333', margin: 0, fontFamily: 'monospace' }}>{loc}</p>
           </div>
           <div style={{ textAlign: 'center' }}>
             <p style={{ fontSize: '0.065in', color: '#aaa', margin: '0 0 0.025in', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>LOT</p>
-            <p style={{ fontSize: '0.13in', fontWeight: 700, color: '#333', margin: 0, fontFamily: 'monospace' }}>{lotShort}</p>
+            <p style={{ fontSize: '0.1in', fontWeight: 700, color: '#333', margin: 0, fontFamily: 'monospace' }}>{lotShort}</p>
           </div>
         </div>
 

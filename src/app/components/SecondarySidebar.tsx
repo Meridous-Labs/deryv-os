@@ -209,6 +209,7 @@ const secondaryNavConfig: Record<string, NavSection[]> = {
     { heading: 'Preferences', items: [
       { id: 'notifications', label: 'Notifications' },
       { id: 'branding', label: 'Branding' },
+      { id: 'inventory', label: 'Inventory IDs' },
     ]},
   ],
 };
