@@ -282,7 +282,7 @@ export function Integrations() {
                             className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[12px] text-white font-medium disabled:opacity-60"
                           >
                             {isWorking ? <Loader2 size={11} className="animate-spin" /> : <ExternalLink size={11} />}
-                            {isWorking ? 'Connecting...' : 'Connect'}
+                            {isWorking ? 'Connecting...' : (status === 'OAUTH_REQUIRED' || status === 'RECONNECT_REQUIRED') ? 'Reconnect' : 'Connect'}
                           </button>
                         )}
                         {integration.type === 'credentials' && (
@@ -293,7 +293,7 @@ export function Integrations() {
                             <Settings size={11} />Configure
                           </button>
                         )}
-                        {conn && (
+                        {conn && status === 'CONNECTED' && (
                           <button
                             onClick={() => testConnection(integration)}
                             disabled={isWorking}
