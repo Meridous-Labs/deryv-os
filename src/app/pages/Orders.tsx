@@ -109,7 +109,7 @@ function CreateOrderModal({ open, onClose, orgId, userId, inventoryItems, onCrea
       notes: form.notes || null,
     });
     if (orderErr) { setError(orderErr); setSaving(false); return; }
-    const orderId = orderData?.[0]?.id;
+    const orderId = orderData?.id;
     if (!orderId) { setError('Failed to create order.'); setSaving(false); return; }
 
     // Create order_items
