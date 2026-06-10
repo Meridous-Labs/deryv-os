@@ -16,7 +16,7 @@ import { FilterBar, FilterValues, FilterDef } from '../components/FilterBar';
 const INV_STATUSES = ['UNPROCESSED', 'TESTING', 'PHOTOGRAPHY', 'LISTING', 'ACTIVE', 'PICKED', 'PACKED', 'SHIPPED', 'DELIVERED', 'RETURNED', 'SCRAPPED', 'DAMAGED'];
 const GRADES = ['A+', 'A', 'B+', 'B', 'C+', 'C', 'F'];
 
-const INV_SELECT = 'id, inventory_id, sku, upc, serial_number, product_title, brand, category, model, condition, grade, status, msrp, current_asking_price, weighted_acquisition_cost, component_cost, supply_cost, shipping_cost, marketplace_fees, warehouse_location_id, lot_id, notes, created_at, barcode_value, label_generated_at, warehouse_locations(location_code, zone, rack, shelf, bin), lots(lot_id)';
+const INV_SELECT = 'id, inventory_id, sku, upc, serial_number, product_title, brand, category, model, condition, grade, status, msrp, current_asking_price, weighted_acquisition_cost, component_cost, supply_cost, shipping_cost, marketplace_fees, warehouse_location_id, lot_id, notes, created_at, barcode_value, label_generated_at, weight_oz, length_in, width_in, height_in, warehouse_locations(location_code, zone, rack, shelf, bin), lots(lot_id)';
 
 const STATUS_TO_VIEW: Record<string, string> = {
   unprocessed: 'UNPROCESSED', testing: 'TESTING', photography: 'PHOTOGRAPHY',
@@ -349,6 +349,10 @@ export function Inventory() {
       warehouse_location_id: item.warehouse_location_id ?? '',
       lot_id: item.lot_id ?? '',
       notes: item.notes ?? '',
+      weight_oz: item.weight_oz != null ? String(item.weight_oz) : '',
+      length_in: item.length_in != null ? String(item.length_in) : '',
+      width_in: item.width_in != null ? String(item.width_in) : '',
+      height_in: item.height_in != null ? String(item.height_in) : '',
     });
     setEditing(true);
     setMoving(false);
@@ -377,6 +381,10 @@ export function Inventory() {
       warehouse_location_id: editForm.warehouse_location_id || null,
       lot_id: editForm.lot_id || null,
       notes: editForm.notes || null,
+      weight_oz: parseFloat(editForm.weight_oz) || null,
+      length_in: parseFloat(editForm.length_in) || null,
+      width_in: parseFloat(editForm.width_in) || null,
+      height_in: parseFloat(editForm.height_in) || null,
     });
     if (err) { setSaving(false); setDrawerError(err); return; }
     await logActivity(orgId!, user?.id!, `Inventory item "${editForm.product_title}" updated`, 'inventory_items', selected.id);
@@ -834,6 +842,23 @@ export function Inventory() {
                 </FormField>
                 <FormField label="Condition"><textarea className={textareaCls} rows={2} value={editForm.condition} onChange={e => setEF('condition', e.target.value)} /></FormField>
                 <FormField label="Notes"><textarea className={textareaCls} rows={2} value={editForm.notes} onChange={e => setEF('notes', e.target.value)} /></FormField>
+                <div>
+                  <label className="text-[11px] font-medium text-gray-500 mb-2 block uppercase tracking-wide">Weight & Dimensions (for shipping)</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField label="Weight (oz)">
+                      <input type="number" className={inputCls} value={editForm.weight_oz} onChange={e => setEF('weight_oz', e.target.value)} placeholder="16" min="0" step="0.1" />
+                    </FormField>
+                    <FormField label="Length (in)">
+                      <input type="number" className={inputCls} value={editForm.length_in} onChange={e => setEF('length_in', e.target.value)} placeholder="12" min="0" step="0.1" />
+                    </FormField>
+                    <FormField label="Width (in)">
+                      <input type="number" className={inputCls} value={editForm.width_in} onChange={e => setEF('width_in', e.target.value)} placeholder="8" min="0" step="0.1" />
+                    </FormField>
+                    <FormField label="Height (in)">
+                      <input type="number" className={inputCls} value={editForm.height_in} onChange={e => setEF('height_in', e.target.value)} placeholder="4" min="0" step="0.1" />
+                    </FormField>
+                  </div>
+                </div>
               </div>
             ) : (
               <div>
@@ -852,6 +877,10 @@ export function Inventory() {
                 <DetailRow label="Location" value={locationLabel(selected.warehouse_locations)} />
                 <DetailRow label="LOT" value={lotLabel(selected) !== '—' ? lotLabel(selected) : null} />
                 <DetailRow label="Notes" value={selected.notes} />
+                <DetailRow label="Weight" value={selected.weight_oz != null ? `${selected.weight_oz} oz` : null} />
+                {(selected.length_in || selected.width_in || selected.height_in) && (
+                  <DetailRow label="Dimensions" value={`${selected.length_in ?? '?'} × ${selected.width_in ?? '?'} × ${selected.height_in ?? '?'} in`} />
+                )}
                 <DetailRow label="Label Generated" value={selected.label_generated_at ? new Date(selected.label_generated_at).toLocaleDateString() : 'Never'} />
                 <DetailRow label="Created" value={selected.created_at ? new Date(selected.created_at).toLocaleDateString() : null} />
 
