@@ -1,869 +1,1003 @@
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { useState } from 'react';
+import { RefreshCw, Settings, ExternalLink, AlertCircle, Loader2, X, CheckCircle, Clock, AlertTriangle, ChevronDown } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useOrgQuery, logActivity } from '../../lib/hooks';
+import { useSecondaryView } from '../components/SecondarySidebar';
+import { ErrorState } from '../components/DataStates';
+import { supabase } from '../../lib/supabase';
 
-const FUNCTION_NAME = "integration-configure";
+const KNOWN_INTEGRATIONS = [
+  { id: 'shopify', name: 'Shopify', category: 'Marketplace', description: 'Sync inventory and orders with your Shopify storefront.', initials: 'SH', type: 'oauth' as const },
+  { id: 'ebay', name: 'eBay', category: 'Marketplace', description: 'List, manage and sync eBay listings automatically.', initials: 'eB', type: 'oauth' as const },
+  { id: 'shipstation', name: 'ShipStation', category: 'Shipping', description: 'Multi-carrier shipping and label management.', initials: 'SS', type: 'credentials' as const },
+  { id: 'quickbooks', name: 'QuickBooks', category: 'Accounting', description: 'Sync revenue, COGS, and expenses to QuickBooks Online.', initials: 'QB', type: 'oauth' as const },
+];
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Content-Type": "application/json",
+const categoryMap: Record<string, string> = {
+  marketplace: 'Marketplace',
+  shipping: 'Shipping',
+  accounting: 'Accounting',
 };
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+export function Integrations() {
+  const view = useSecondaryView();
+  const { orgId, user } = useAuth();
+  const [working, setWorking] = useState<string | null>(null);
+  const [setupDrawer, setSetupDrawer] = useState<{ provider: string; name: string; type: string } | null>(null);
+  const [eventsDrawer, setEventsDrawer] = useState<string | null>(null);
+  const [mappingDrawer, setMappingDrawer] = useState<boolean>(false);
+  const [ebaySettingsDrawer, setEbaySettingsDrawer] = useState<boolean>(false);
+  const [events, setEvents] = useState<any[]>([]);
 
-// QuickBooks OAuth credentials (platform-level, registered once by Jai)
-const QB_CLIENT_ID = Deno.env.get("QUICKBOOKS_CLIENT_ID") ?? "";
-const QB_CLIENT_SECRET = Deno.env.get("QUICKBOOKS_CLIENT_SECRET") ?? "";
-const QB_REDIRECT_URI = Deno.env.get("QUICKBOOKS_REDIRECT_URI") ??
-  `${SUPABASE_URL}/functions/v1/integration-configure?provider=quickbooks&action=callback`;
-const QB_SCOPES = "com.intuit.quickbooks.accounting";
+  const { data: connections, loading, error, reload } = useOrgQuery(
+    'integration_connections', orgId, {
+      select: 'id, provider, status, health, last_sync_at, config, created_at',
+    });
 
-// Intuit discovery document URL — used to resolve OAuth endpoints dynamically
-const INTUIT_DISCOVERY_DOC_URL =
-  "https://developer.api.intuit.com/.well-known/openid_configuration";
+  const getConnection = (id: string) => connections.find((c: any) => c.provider === id);
 
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+  const startOAuth = async (integration: typeof KNOWN_INTEGRATIONS[0], shopDomain?: string) => {
+    setWorking(integration.id);
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+    if (!orgId) {
+      alert('Organization is still loading. Try again.');
+      setWorking(null);
+      return;
+    }
 
-function json(body: Record<string, unknown>, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: corsHeaders,
-  });
-}
+    if (!user?.id) console.warn('Starting OAuth without user_id');
 
-function redirect(url: string) {
-  return new Response(null, {
-    status: 302,
-    headers: { ...corsHeaders, Location: url },
-  });
-}
+    let payload: any = { return_path: '/integrations' };
 
-async function parseBody(req: Request) {
-  const raw = await req.text();
-  if (!raw || raw.trim() === "") return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new Error("Invalid JSON request body.");
-  }
-}
+    if (integration.id === 'shopify') {
+      if (!shopDomain) {
+        setSetupDrawer({ provider: integration.id, name: integration.name, type: 'oauth_input' });
+        setWorking(null);
+        return;
+      }
+      payload.shop = shopDomain;
+    }
 
-function normalizeProvider(provider: unknown) {
-  return String(provider || "").trim().toLowerCase();
-}
+    try {
+      const { data, error } = await supabase.functions.invoke('integration-start', {
+        body: { organization_id: orgId, user_id: user?.id, provider: integration.id, payload },
+      });
 
-/** Fetch Intuit's discovery document and return the resolved endpoints. */
-async function getIntuitEndpoints(): Promise<{
-  authorizationEndpoint: string;
-  tokenEndpoint: string;
-  revocationEndpoint: string;
-}> {
-  const res = await fetch(INTUIT_DISCOVERY_DOC_URL);
-  if (!res.ok) {
-    throw new Error(
-      `Failed to fetch Intuit discovery document: ${res.status} ${res.statusText}`
-    );
-  }
-  const doc = await res.json();
-  return {
-    authorizationEndpoint: doc.authorization_endpoint,
-    tokenEndpoint: doc.token_endpoint,
-    revocationEndpoint: doc.revocation_endpoint,
+      if (error) { alert(`Failed to start OAuth: ${error.message || 'Unknown error'}`); setWorking(null); return; }
+      if (data?.error) { alert(`Failed to start OAuth: ${data.error}`); setWorking(null); return; }
+      if (data?.oauth_url) {
+        await logActivity(orgId!, user?.id!, `Started ${integration.name} OAuth`, 'integration_connections');
+        window.location.href = data.oauth_url;
+        return;
+      }
+
+      alert('OAuth URL was not returned by integration-start.');
+      setWorking(null);
+    } catch (err: any) {
+      alert(`Failed to start OAuth: ${err.message || 'Unknown error'}`);
+      setWorking(null);
+    }
   };
-}
 
-/** Generate a cryptographically random CSRF state token. */
-function generateState(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-/** Store CSRF state in Supabase so we can verify it on callback. */
-async function saveOAuthState(
-  state: string,
-  organization_id: string,
-  provider: string
-) {
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min TTL
-  const { error } = await supabase.from("integration_oauth_states").upsert(
-    {
-      state,
-      organization_id,
-      provider,
-      expires_at: expiresAt,
-      created_at: new Date().toISOString(),
-    },
-    { onConflict: "state" }
-  );
-  if (error) throw new Error(`Failed to save OAuth state: ${error.message}`);
-}
-
-/** Validate and consume a CSRF state token (one-time use). */
-async function consumeOAuthState(
-  state: string
-): Promise<{ organization_id: string; provider: string } | null> {
-  const { data, error } = await supabase
-    .from("integration_oauth_states")
-    .select("organization_id, provider, expires_at")
-    .eq("state", state)
-    .single();
-
-  if (error || !data) return null;
-
-  // Delete it immediately (one-time use)
-  await supabase.from("integration_oauth_states").delete().eq("state", state);
-
-  // Check expiry
-  if (new Date(data.expires_at) < new Date()) return null;
-
-  return { organization_id: data.organization_id, provider: data.provider };
-}
-
-// ---------------------------------------------------------------------------
-// Logging & DB helpers
-// ---------------------------------------------------------------------------
-
-async function logEvent(params: {
-  organization_id: string;
-  provider: string;
-  event_type: string;
-  status: string;
-  payload?: Record<string, unknown>;
-  response?: Record<string, unknown>;
-  error?: string | null;
-  intuit_tid?: string | null;
-}) {
-  await supabase.from("integration_events").insert({
-    organization_id: params.organization_id,
-    provider: params.provider,
-    event_type: params.event_type,
-    status: params.status,
-    payload: params.payload ?? {},
-    response: {
-      ...(params.response ?? {}),
-      ...(params.intuit_tid ? { intuit_tid: params.intuit_tid } : {}),
-    },
-    error: params.error ?? null,
-    processed_at: ["COMPLETED", "FAILED"].includes(params.status)
-      ? new Date().toISOString()
-      : null,
-  });
-}
-
-async function upsertConnection(params: {
-  organization_id: string;
-  provider: string;
-  status: string;
-  auth_type: string;
-  account_label?: string | null;
-  external_account_id?: string | null;
-  encrypted_access_token?: string | null;
-  encrypted_refresh_token?: string | null;
-  token_expires_at?: string | null;
-  scopes?: string[] | null;
-  config?: Record<string, unknown>;
-  error?: string | null;
-}) {
-  const { data, error } = await supabase
-    .from("integration_connections")
-    .upsert(
-      {
-        organization_id: params.organization_id,
-        provider: params.provider,
-        status: params.status,
-        auth_type: params.auth_type,
-        account_label: params.account_label ?? null,
-        external_account_id: params.external_account_id ?? null,
-        encrypted_access_token: params.encrypted_access_token ?? null,
-        encrypted_refresh_token: params.encrypted_refresh_token ?? null,
-        token_expires_at: params.token_expires_at ?? null,
-        scopes: params.scopes ?? null,
-        config: params.config ?? {},
-        error: params.error ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "organization_id,provider" }
-    )
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to save integration connection: ${error.message}`);
-  }
-
-  return data;
-}
-
-// ---------------------------------------------------------------------------
-// QuickBooks OAuth — token exchange with retry + intuit_tid capture
-// ---------------------------------------------------------------------------
-
-interface QBTokenResponse {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
-  x_refresh_token_expires_in: number;
-  token_type: string;
-  intuit_tid?: string; // captured from response header
-}
-
-/**
- * Exchange an auth code or refresh token for QBO tokens.
- * Retries once on transient failures (5xx). Captures intuit_tid header.
- */
-async function fetchQBTokens(
-  tokenEndpoint: string,
-  params: URLSearchParams,
-  attempt = 1
-): Promise<QBTokenResponse> {
-  const credentials = btoa(`${QB_CLIENT_ID}:${QB_CLIENT_SECRET}`);
-
-  const res = await fetch(tokenEndpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${credentials}`,
-      Accept: "application/json",
-    },
-    body: params.toString(),
-  });
-
-  // Always capture intuit_tid for support/debug purposes
-  const intuitTid = res.headers.get("intuit_tid") ?? undefined;
-
-  if (!res.ok) {
-    const errorBody = await res.text();
-
-    // Retry once on 5xx transient errors
-    if (res.status >= 500 && attempt < 2) {
-      console.warn(
-        `QB token endpoint returned ${res.status}, retrying... (intuit_tid: ${intuitTid})`
-      );
-      await new Promise((r) => setTimeout(r, 1000));
-      return fetchQBTokens(tokenEndpoint, params, attempt + 1);
-    }
-
-    // Surface specific error types
-    let errorType = "token_exchange_failed";
+  const testConnection = async (integration: typeof KNOWN_INTEGRATIONS[0]) => {
+    setWorking(integration.id);
     try {
-      const parsed = JSON.parse(errorBody);
-      if (parsed.error === "invalid_grant") errorType = "invalid_grant";
-      if (parsed.error === "invalid_client") errorType = "invalid_client";
-    } catch { /* ignore */ }
+      const { data, error } = await supabase.functions.invoke('integration-test', {
+        body: { organization_id: orgId, provider: integration.id, user_id: user?.id },
+      });
+      if (error) throw error;
+      await logActivity(orgId!, user?.id!, `Tested ${integration.name} connection`, 'integration_connections');
+      reload();
+    } catch (err: any) {
+      alert(`Connection test failed: ${err.message}`);
+    } finally {
+      setWorking(null);
+    }
+  };
 
-    throw Object.assign(
-      new Error(
-        `QB token exchange failed (${res.status}): ${errorBody} [intuit_tid: ${intuitTid}]`
-      ),
-      { errorType, intuitTid }
-    );
+  const syncNow = async (integration: typeof KNOWN_INTEGRATIONS[0]) => {
+    setWorking(integration.id);
+    try {
+      const { data, error } = await supabase.functions.invoke('integration-sync', {
+        body: { organization_id: orgId, provider: integration.id, user_id: user?.id },
+      });
+      if (error) throw error;
+      await logActivity(orgId!, user?.id!, `Synced ${integration.name}`, 'integration_connections');
+      reload();
+    } catch (err: any) {
+      alert(`Sync failed: ${err.message}`);
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const disconnect = async (integration: typeof KNOWN_INTEGRATIONS[0]) => {
+    if (!confirm(`Disconnect ${integration.name}? You'll need to re-authenticate to reconnect.`)) return;
+    setWorking(integration.id);
+    try {
+      const { data, error } = await supabase.functions.invoke('integration-disconnect', {
+        body: { organization_id: orgId, provider: integration.id, user_id: user?.id },
+      });
+      if (error) throw error;
+      await logActivity(orgId!, user?.id!, `Disconnected ${integration.name}`, 'integration_connections');
+      reload();
+    } catch (err: any) {
+      alert(`Disconnect failed: ${err.message}`);
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const loadEvents = async (provider: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('integration-events', {
+        body: { organization_id: orgId, provider, user_id: user?.id, limit: 50 },
+      });
+      if (error) throw error;
+      setEvents(data.events ?? []);
+      setEventsDrawer(provider);
+    } catch (err: any) {
+      alert(`Failed to load events: ${err.message}`);
+    }
+  };
+
+  const visible = view === 'all' || view === 'overview'
+    ? KNOWN_INTEGRATIONS
+    : KNOWN_INTEGRATIONS.filter(i => i.category.toLowerCase() === categoryMap[view]?.toLowerCase());
+
+  const connectedCount = KNOWN_INTEGRATIONS.filter(i => getConnection(i.id)?.status === 'CONNECTED').length;
+
+  const grouped: Record<string, typeof KNOWN_INTEGRATIONS> = {};
+  for (const item of visible) {
+    if (!grouped[item.category]) grouped[item.category] = [];
+    grouped[item.category].push(item);
   }
 
-  const data = await res.json();
-  return { ...data, intuit_tid: intuitTid };
-}
+  return (
+    <div className="p-6 max-w-[1200px] space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-gray-900">Integrations</h2>
+          {loading
+            ? <p className="text-[13px] text-gray-400 mt-0.5">Loading...</p>
+            : <p className="text-[13px] text-gray-400 mt-0.5">{connectedCount} of {KNOWN_INTEGRATIONS.length} connected</p>
+          }
+        </div>
+      </div>
 
-// ---------------------------------------------------------------------------
-// QuickBooks action handlers
-// ---------------------------------------------------------------------------
+      {error && <ErrorState message={error} onRetry={reload} />}
 
-/**
- * action=connect
- * Generates the Intuit authorization URL and returns it (or redirects).
- * Requires: organization_id in query params or POST body.
- */
-async function handleQBConnect(
-  organization_id: string,
-  redirectToIntuit: boolean
-): Promise<Response> {
-  if (!QB_CLIENT_ID) {
-    return json({ success: false, error: "QUICKBOOKS_CLIENT_ID is not configured." }, 500);
-  }
+      {Object.entries(grouped).map(([category, items]) => (
+        <div key={category}>
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">{category}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {items.map(integration => {
+              const conn = getConnection(integration.id);
+              let status = conn?.status ?? 'NOT_CONFIGURED';
+              let statusLabel = 'Not Configured';
+              let statusColor = 'bg-gray-100 text-gray-500';
 
-  const { authorizationEndpoint } = await getIntuitEndpoints();
-  const state = generateState();
-  await saveOAuthState(state, organization_id, "quickbooks");
+              switch (status) {
+                case 'CONNECTED':
+                  if (conn?.health === 'DEGRADED') { statusLabel = 'Error'; statusColor = 'bg-amber-100 text-amber-700'; }
+                  else { statusLabel = 'Connected'; statusColor = 'bg-[#ECFDF5] text-[#15803d]'; }
+                  break;
+                case 'OAUTH_REQUIRED': statusLabel = 'OAuth Required'; statusColor = 'bg-amber-50 text-amber-600'; break;
+                case 'CREDENTIALS_NEEDED': statusLabel = 'Credentials Needed'; statusColor = 'bg-amber-50 text-amber-600'; break;
+                case 'DISCONNECTED': statusLabel = 'Disconnected'; statusColor = 'bg-gray-100 text-gray-500'; break;
+                case 'RECONNECT_REQUIRED': statusLabel = 'Reconnect Required'; statusColor = 'bg-red-50 text-red-600'; break;
+                case 'ERROR': statusLabel = 'Error'; statusColor = 'bg-red-100 text-red-700'; break;
+              }
 
-  const authUrl = new URL(authorizationEndpoint);
-  authUrl.searchParams.set("client_id", QB_CLIENT_ID);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", QB_SCOPES);
-  authUrl.searchParams.set("redirect_uri", QB_REDIRECT_URI);
-  authUrl.searchParams.set("state", state);
+              const isConnected = status === 'CONNECTED';
+              const isDegraded = conn?.health === 'DEGRADED';
+              const isWorking = working === integration.id;
+              const isQB = integration.id === 'quickbooks';
 
-  // Log the connect initiation
-  await logEvent({
-    organization_id,
-    provider: "quickbooks",
-    event_type: "oauth_connect_initiated",
-    status: "PENDING",
-    payload: { scope: QB_SCOPES },
-  });
+              return (
+                <div key={integration.id}
+                  className={`bg-white rounded-xl border p-5 hover:shadow-sm transition-all ${isConnected ? 'border-[rgba(0,0,0,0.08)]' : 'border-[rgba(0,0,0,0.06)]'}`}>
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-gray-900 flex items-center justify-center text-white font-semibold text-[12px] flex-shrink-0">
+                        {integration.initials}
+                      </div>
+                      <div>
+                        <p className="text-[13px] font-semibold text-gray-900">{integration.name}</p>
+                        <p className="text-[11px] text-gray-400">{integration.category}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {isDegraded && <AlertCircle size={11} className="text-amber-500" />}
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusColor}`}>{statusLabel}</span>
+                    </div>
+                  </div>
 
-  if (redirectToIntuit) {
-    return redirect(authUrl.toString());
-  }
+                  <p className="text-[12px] text-gray-500 mb-2 leading-relaxed">{integration.description}</p>
 
-  return json({
-    success: true,
-    provider: "quickbooks",
-    action: "connect",
-    auth_url: authUrl.toString(),
-  });
-}
+                  {isConnected && conn?.last_sync_at && (
+                    <p className="text-[11px] text-gray-400 mb-3 flex items-center gap-1">
+                      <RefreshCw size={10} />
+                      {new Date(conn.last_sync_at).toLocaleString()}
+                      {isDegraded && <span className="text-amber-600 ml-1">· Degraded</span>}
+                    </p>
+                  )}
 
-/**
- * action=callback
- * Handles Intuit's redirect after user authorization.
- * Validates CSRF state, exchanges code for tokens, saves to integration_connections.
- */
-async function handleQBCallback(url: URL): Promise<Response> {
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  const realmId = url.searchParams.get("realmId"); // QBO company ID
-  const errorParam = url.searchParams.get("error");
+                  <div className="flex gap-2">
+                    {isConnected ? (
+                      <>
+                        {isQB && (
+                          <button
+                            onClick={() => setMappingDrawer(true)}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
+                          >
+                            <Settings size={11} />Map Data
+                          </button>
+                        )}
+                        {integration.id === 'ebay' && (
+                          <button
+                            onClick={() => setEbaySettingsDrawer(true)}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
+                          >
+                            <Settings size={11} />Configure
+                          </button>
+                        )}
+                        {!isQB && (
+                          <button
+                            onClick={() => loadEvents(integration.id)}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
+                          >
+                            <Clock size={11} />Events
+                          </button>
+                        )}
+                        {isQB && (
+                          <button
+                            onClick={() => loadEvents(integration.id)}
+                            className="px-2.5 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-[12px] text-gray-700 hover:bg-gray-50"
+                          >
+                            <Clock size={11} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => syncNow(integration)}
+                          disabled={isWorking}
+                          className="px-2.5 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-gray-400 hover:bg-gray-50 disabled:opacity-60"
+                        >
+                          {isWorking ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                        </button>
+                        <button
+                          onClick={() => disconnect(integration)}
+                          disabled={isWorking}
+                          className="px-2.5 py-1.5 border border-red-100 rounded-lg text-[11px] text-red-400 hover:bg-red-50 disabled:opacity-60"
+                        >
+                          Disconnect
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {integration.type === 'oauth' && (
+                          <button
+                            onClick={() => startOAuth(integration)}
+                            disabled={isWorking}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[12px] text-white font-medium disabled:opacity-60"
+                          >
+                            {isWorking ? <Loader2 size={11} className="animate-spin" /> : <ExternalLink size={11} />}
+                            {isWorking ? 'Connecting...' : (status === 'OAUTH_REQUIRED' || status === 'RECONNECT_REQUIRED') ? 'Reconnect' : 'Connect'}
+                          </button>
+                        )}
+                        {integration.type === 'credentials' && (
+                          <button
+                            onClick={() => setSetupDrawer({ provider: integration.id, name: integration.name, type: 'credentials' })}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[12px] text-white font-medium"
+                          >
+                            <Settings size={11} />Configure
+                          </button>
+                        )}
+                        {conn && status === 'CONNECTED' && (
+                          <button
+                            onClick={() => testConnection(integration)}
+                            disabled={isWorking}
+                            className="px-2.5 py-1.5 border border-[rgba(0,0,0,0.1)] rounded-lg text-gray-400 hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            {isWorking ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
 
-  // User denied access
-  if (errorParam) {
-    console.error(`QB OAuth error from Intuit: ${errorParam}`);
-    return redirect(
-      `${Deno.env.get("APP_URL") ?? "https://deryvos.com"}/integrations?error=qb_denied`
-    );
-  }
+      {setupDrawer && (
+        <SetupDrawer
+          provider={setupDrawer.provider}
+          name={setupDrawer.name}
+          type={setupDrawer.type}
+          orgId={orgId!}
+          userId={user?.id!}
+          onClose={() => setSetupDrawer(null)}
+          onSuccess={() => { setSetupDrawer(null); reload(); }}
+          onOAuthContinue={(shopDomain: string) => {
+            setSetupDrawer(null);
+            const integration = KNOWN_INTEGRATIONS.find(i => i.id === setupDrawer.provider);
+            if (integration) startOAuth(integration, shopDomain);
+          }}
+        />
+      )}
 
-  if (!code || !state) {
-    return json({ success: false, error: "Missing code or state in callback." }, 400);
-  }
+      {eventsDrawer && (
+        <EventsDrawer
+          provider={eventsDrawer}
+          name={KNOWN_INTEGRATIONS.find(i => i.id === eventsDrawer)?.name ?? ''}
+          events={events}
+          onClose={() => setEventsDrawer(null)}
+        />
+      )}
 
-  // Validate CSRF state
-  const stateData = await consumeOAuthState(state);
-  if (!stateData) {
-    return json({ success: false, error: "Invalid or expired OAuth state. Possible CSRF attempt." }, 400);
-  }
+      {mappingDrawer && (
+        <QBMappingDrawer
+          orgId={orgId!}
+          userId={user?.id!}
+          onClose={() => setMappingDrawer(false)}
+          onSuccess={() => { setMappingDrawer(false); reload(); }}
+        />
+      )}
 
-  const { organization_id } = stateData;
-  const { tokenEndpoint } = await getIntuitEndpoints();
-
-  let tokens: QBTokenResponse;
-  try {
-    const params = new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: QB_REDIRECT_URI,
-    });
-    tokens = await fetchQBTokens(tokenEndpoint, params);
-  } catch (err: any) {
-    const message = err instanceof Error ? err.message : String(err);
-    const intuitTid = err.intuitTid ?? null;
-
-    await upsertConnection({
-      organization_id,
-      provider: "quickbooks",
-      status: "ERROR",
-      auth_type: "oauth2",
-      error: message,
-    });
-
-    await logEvent({
-      organization_id,
-      provider: "quickbooks",
-      event_type: "oauth_callback",
-      status: "FAILED",
-      error: message,
-      intuit_tid: intuitTid,
-    });
-
-    return redirect(
-      `${Deno.env.get("APP_URL") ?? "https://deryvos.com"}/integrations?error=qb_token_failed`
-    );
-  }
-
-  const tokenExpiresAt = new Date(
-    Date.now() + tokens.expires_in * 1000
-  ).toISOString();
-
-  const connection = await upsertConnection({
-    organization_id,
-    provider: "quickbooks",
-    status: "CONNECTED",
-    auth_type: "oauth2",
-    account_label: `QuickBooks (${realmId})`,
-    external_account_id: realmId,
-    encrypted_access_token: tokens.access_token,
-    encrypted_refresh_token: tokens.refresh_token,
-    token_expires_at: tokenExpiresAt,
-    scopes: QB_SCOPES.split(" "),
-    config: {
-      realm_id: realmId,
-      refresh_token_expires_in: tokens.x_refresh_token_expires_in,
-      connected_at: new Date().toISOString(),
-    },
-    error: null,
-  });
-
-  await logEvent({
-    organization_id,
-    provider: "quickbooks",
-    event_type: "oauth_callback",
-    status: "COMPLETED",
-    payload: { realm_id: realmId },
-    response: { connection_id: connection.id, status: connection.status },
-    intuit_tid: tokens.intuit_tid ?? null,
-  });
-
-  return redirect(
-    `${Deno.env.get("APP_URL") ?? "https://deryvos.com"}/integrations?connected=quickbooks`
+      {ebaySettingsDrawer && (
+        <EbaySettingsDrawer
+          orgId={orgId!}
+          userId={user?.id!}
+          onClose={() => setEbaySettingsDrawer(false)}
+          onSuccess={() => { setEbaySettingsDrawer(false); reload(); }}
+        />
+      )}
+    </div>
   );
 }
 
-/**
- * action=disconnect
- * Revokes QBO tokens via Intuit's revocation endpoint and clears the connection.
- */
-async function handleQBDisconnect(organization_id: string): Promise<Response> {
-  // Fetch existing connection
-  const { data: connection, error: fetchError } = await supabase
-    .from("integration_connections")
-    .select("encrypted_access_token, encrypted_refresh_token")
-    .eq("organization_id", organization_id)
-    .eq("provider", "quickbooks")
-    .single();
+// ---------------------------------------------------------------------------
+// QB Mapping Drawer
+// ---------------------------------------------------------------------------
 
-  if (fetchError || !connection) {
-    return json({ success: false, error: "No active QuickBooks connection found." }, 404);
-  }
+const QB_MAPPING_FIELDS = [
+  { key: 'sales_income_account', label: 'Sales income', description: 'Revenue from LOT sales and orders', section: 'Income & revenue' },
+  { key: 'shipping_income_account', label: 'Shipping income', description: 'Shipping fees charged to customers', section: 'Income & revenue' },
+  { key: 'cogs_account', label: 'Cost of goods sold (COGS)', description: 'Inventory cost at time of sale', section: 'Cost of goods' },
+  { key: 'inventory_asset_account', label: 'Inventory asset', description: 'Balance sheet account for inventory on hand', section: 'Cost of goods' },
+  { key: 'shipping_expense_account', label: 'Shipping expense', description: 'Outbound shipping costs paid by deryv', section: 'Cost of goods' },
+];
 
-  const { revocationEndpoint } = await getIntuitEndpoints();
-  const credentials = btoa(`${QB_CLIENT_ID}:${QB_CLIENT_SECRET}`);
+const QB_SYNC_FIELDS = [
+  {
+    key: 'sync_frequency',
+    label: 'Sync frequency',
+    description: 'How often deryv pushes data to QuickBooks',
+    options: [
+      { value: 'daily', label: 'Daily' },
+      { value: 'weekly', label: 'Weekly' },
+      { value: 'on_sale', label: 'On sale' },
+    ],
+  },
+  {
+    key: 'transaction_type',
+    label: 'Transaction type',
+    description: 'How sales are recorded in QuickBooks',
+    options: [
+      { value: 'sales_receipt', label: 'Sales receipt' },
+      { value: 'invoice', label: 'Invoice' },
+      { value: 'journal_entry', label: 'Journal entry' },
+    ],
+  },
+];
 
-  // Revoke the refresh token (invalidates both tokens)
-  if (connection.encrypted_refresh_token) {
+// Account types we want to surface per mapping field
+const RELEVANT_ACCOUNT_TYPES: Record<string, string[]> = {
+  sales_income_account: ['Income'],
+  shipping_income_account: ['Income'],
+  cogs_account: ['Cost of Goods Sold', 'Expense'],
+  inventory_asset_account: ['Other Current Asset', 'Other Asset'],
+  shipping_expense_account: ['Expense', 'Cost of Goods Sold'],
+};
+
+function QBMappingDrawer({ orgId, userId, onClose, onSuccess }: {
+  orgId: string;
+  userId: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [accounts, setAccounts] = useState<Record<string, { id: string; name: string; subtype: string }[]>>({});
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+
+  // Load existing mapping + QB accounts on mount
+  useState(() => {
+    (async () => {
+      try {
+        // Load existing saved mapping
+        const { data: existing } = await supabase
+          .from('integration_qb_mappings')
+          .select('*')
+          .eq('organization_id', orgId)
+          .maybeSingle();
+
+        if (existing) {
+          const saved: Record<string, string> = {};
+          for (const field of [...QB_MAPPING_FIELDS, ...QB_SYNC_FIELDS]) {
+            if (existing[field.key]) saved[field.key] = existing[field.key];
+          }
+          setMapping(saved);
+          setLastSaved(existing.updated_at ? new Date(existing.updated_at).toLocaleString() : null);
+        }
+
+        // Fetch live QB chart of accounts
+        const { data, error } = await supabase.functions.invoke('integration-qb-accounts', {
+          body: { organization_id: orgId },
+        });
+
+        // Supabase wraps non-2xx responses in error.message — try to get the real message from data
+        if (error) {
+          const friendlyMessage = (data as any)?.error ?? error.message ?? 'Failed to load QuickBooks accounts.';
+          throw new Error(friendlyMessage);
+        }
+        if (data?.error) throw new Error(data.error);
+
+        setAccounts(data.accounts ?? {});
+      } catch (err: any) {
+        setAccountsError(err.message ?? 'Failed to load QuickBooks accounts.');
+      } finally {
+        setLoadingAccounts(false);
+      }
+    })();
+  });
+
+  const getOptionsForField = (fieldKey: string) => {
+    const relevantTypes = RELEVANT_ACCOUNT_TYPES[fieldKey] ?? [];
+    const options: { value: string; label: string }[] = [];
+    for (const type of relevantTypes) {
+      const accts = accounts[type] ?? [];
+      for (const acct of accts) {
+        options.push({ value: acct.id, label: acct.name });
+      }
+    }
+    return options;
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
     try {
-      const res = await fetch(revocationEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Basic ${credentials}`,
-          Accept: "application/json",
-        },
-        body: new URLSearchParams({
-          token: connection.encrypted_refresh_token,
-        }).toString(),
-      });
-
-      const intuitTid = res.headers.get("intuit_tid") ?? null;
-
-      if (!res.ok) {
-        // Log but don't block disconnect — still clear locally
-        console.warn(`QB token revocation returned ${res.status} (intuit_tid: ${intuitTid})`);
-      }
-
-      await logEvent({
-        organization_id,
-        provider: "quickbooks",
-        event_type: "oauth_disconnect",
-        status: res.ok ? "COMPLETED" : "PARTIAL",
-        payload: { revocation_status: res.status },
-        intuit_tid: intuitTid,
-      });
-    } catch (err) {
-      console.error("QB revocation request failed:", err);
-      // Still proceed with local cleanup
-    }
-  }
-
-  // Clear the connection locally regardless of revocation result
-  await upsertConnection({
-    organization_id,
-    provider: "quickbooks",
-    status: "DISCONNECTED",
-    auth_type: "oauth2",
-    encrypted_access_token: null,
-    encrypted_refresh_token: null,
-    token_expires_at: null,
-    scopes: null,
-    error: null,
-    config: { disconnected_at: new Date().toISOString() },
-  });
-
-  return json({
-    success: true,
-    provider: "quickbooks",
-    action: "disconnect",
-    message: "QuickBooks disconnected successfully.",
-  });
-}
-
-/**
- * action=refresh
- * Proactively refreshes the QBO access token using the stored refresh token.
- * Called before API requests when the access token is near expiry.
- */
-async function handleQBRefresh(organization_id: string): Promise<Response> {
-  const { data: connection, error: fetchError } = await supabase
-    .from("integration_connections")
-    .select("encrypted_refresh_token, token_expires_at, config")
-    .eq("organization_id", organization_id)
-    .eq("provider", "quickbooks")
-    .single();
-
-  if (fetchError || !connection) {
-    return json({ success: false, error: "No QuickBooks connection found." }, 404);
-  }
-
-  if (!connection.encrypted_refresh_token) {
-    // Refresh token expired — user must reconnect
-    await upsertConnection({
-      organization_id,
-      provider: "quickbooks",
-      status: "RECONNECT_REQUIRED",
-      auth_type: "oauth2",
-      error: "Refresh token expired. User must reconnect.",
-    });
-
-    await logEvent({
-      organization_id,
-      provider: "quickbooks",
-      event_type: "oauth_refresh",
-      status: "FAILED",
-      error: "No refresh token available. Reconnect required.",
-    });
-
-    return json({
-      success: false,
-      provider: "quickbooks",
-      error: "Refresh token expired. Please reconnect QuickBooks.",
-      reconnect_required: true,
-    }, 401);
-  }
-
-  const { tokenEndpoint } = await getIntuitEndpoints();
-
-  let tokens: QBTokenResponse;
-  try {
-    const params = new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: connection.encrypted_refresh_token,
-    });
-    tokens = await fetchQBTokens(tokenEndpoint, params);
-  } catch (err: any) {
-    const message = err instanceof Error ? err.message : String(err);
-    const intuitTid = err.intuitTid ?? null;
-    const isInvalidGrant = err.errorType === "invalid_grant";
-
-    // Invalid grant = refresh token expired or revoked — must reconnect
-    if (isInvalidGrant) {
-      await upsertConnection({
-        organization_id,
-        provider: "quickbooks",
-        status: "RECONNECT_REQUIRED",
-        auth_type: "oauth2",
-        error: "Invalid grant: refresh token revoked or expired.",
-      });
-    }
-
-    await logEvent({
-      organization_id,
-      provider: "quickbooks",
-      event_type: "oauth_refresh",
-      status: "FAILED",
-      error: message,
-      intuit_tid: intuitTid,
-    });
-
-    return json({
-      success: false,
-      provider: "quickbooks",
-      error: message,
-      reconnect_required: isInvalidGrant,
-    }, isInvalidGrant ? 401 : 500);
-  }
-
-  const tokenExpiresAt = new Date(
-    Date.now() + tokens.expires_in * 1000
-  ).toISOString();
-
-  const updated = await upsertConnection({
-    organization_id,
-    provider: "quickbooks",
-    status: "CONNECTED",
-    auth_type: "oauth2",
-    encrypted_access_token: tokens.access_token,
-    encrypted_refresh_token: tokens.refresh_token,
-    token_expires_at: tokenExpiresAt,
-    config: {
-      ...(connection.config ?? {}),
-      last_refreshed_at: new Date().toISOString(),
-    },
-    error: null,
-  });
-
-  await logEvent({
-    organization_id,
-    provider: "quickbooks",
-    event_type: "oauth_refresh",
-    status: "COMPLETED",
-    response: { connection_id: updated.id },
-    intuit_tid: tokens.intuit_tid ?? null,
-  });
-
-  return json({
-    success: true,
-    provider: "quickbooks",
-    action: "refresh",
-    token_expires_at: tokenExpiresAt,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Existing provider handlers (unchanged)
-// ---------------------------------------------------------------------------
-
-async function configureShipStation(body: any) {
-  const organization_id = body.organization_id;
-  const payload = body.payload ?? body.input ?? {};
-
-  const credentials = body.credentials ?? {};
-  const apiKey =
-    payload.api_key || payload.apiKey || body.api_key || body.apiKey || credentials.api_key || credentials.apiKey;
-  const apiSecret =
-    payload.api_secret || payload.apiSecret || body.api_secret || body.apiSecret || credentials.api_secret || credentials.apiSecret;
-  const accountLabel =
-    payload.account_label || payload.accountLabel || body.account_label || "ShipStation";
-
-  if (!apiKey || !apiSecret) {
-    return json(
-      {
-        success: false,
-        provider: "shipstation",
-        status: "CREDENTIALS_NEEDED",
-        error: "ShipStation API key and API secret are required.",
-      },
-      400
-    );
-  }
-
-  const connection = await upsertConnection({
-    organization_id,
-    provider: "shipstation",
-    status: "CONNECTED",
-    auth_type: "api_key",
-    account_label: accountLabel,
-    encrypted_access_token: String(apiKey),
-    encrypted_refresh_token: String(apiSecret),
-    config: {
-      credential_type: "shipstation_api_key_secret",
-      configured_at: new Date().toISOString(),
-    },
-    error: null,
-  });
-
-  await logEvent({
-    organization_id,
-    provider: "shipstation",
-    event_type: "integration_configure",
-    status: "COMPLETED",
-    payload: {
-      provider: "shipstation",
-      account_label: accountLabel,
-      api_key_present: true,
-      api_secret_present: true,
-    },
-    response: { connection_id: connection.id, status: connection.status },
-  });
-
-  return json({
-    success: true,
-    provider: "shipstation",
-    status: connection.status,
-    message: "ShipStation credentials saved. Run Test Connection to verify.",
-    connection,
-  });
-}
-
-async function configureA2XGuidance(body: any) {
-  const organization_id = body.organization_id;
-  const payload = body.payload ?? body.input ?? {};
-
-  const connection = await upsertConnection({
-    organization_id,
-    provider: "a2x",
-    status: "CONFIGURED",
-    auth_type: "setup_guide",
-    account_label: payload.account_label || "A2X Setup Guide",
-    config: {
-      setup_guide_acknowledged: true,
-      notes: payload.notes || null,
-      configured_at: new Date().toISOString(),
-    },
-    error: null,
-  });
-
-  await logEvent({
-    organization_id,
-    provider: "a2x",
-    event_type: "a2x_setup_guide_configured",
-    status: "COMPLETED",
-    payload: { notes: payload.notes || null },
-    response: { connection_id: connection.id, status: connection.status },
-  });
-
-  return json({
-    success: true,
-    provider: "a2x",
-    status: connection.status,
-    message: "A2X setup guidance marked as configured.",
-    connection,
-  });
-}
-
-async function configureGeneric(body: any, provider: string) {
-  const organization_id = body.organization_id;
-  const payload = body.payload ?? body.input ?? {};
-
-  const connection = await upsertConnection({
-    organization_id,
-    provider,
-    status: "CREDENTIALS_NEEDED",
-    auth_type: "config",
-    account_label: payload.account_label || provider,
-    config: { ...payload, configured_at: new Date().toISOString() },
-    error: null,
-  });
-
-  await logEvent({
-    organization_id,
-    provider,
-    event_type: "integration_configure",
-    status: "COMPLETED",
-    payload: { provider, config_keys: Object.keys(payload || {}) },
-    response: { connection_id: connection.id, status: connection.status },
-  });
-
-  return json({
-    success: true,
-    provider,
-    status: connection.status,
-    message: `${provider} configuration saved.`,
-    connection,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Main router
-// ---------------------------------------------------------------------------
-
-serve(async (req) => {
-  try {
-    if (req.method === "OPTIONS") {
-      return new Response("ok", { headers: corsHeaders });
-    }
-
-    if (req.method === "GET") {
-      // Health check
-      const url = new URL(req.url);
-      const provider = normalizeProvider(url.searchParams.get("provider"));
-      const action = url.searchParams.get("action");
-
-      // QuickBooks OAuth callback arrives as a GET redirect from Intuit
-      if (provider === "quickbooks" && action === "callback") {
-        return await handleQBCallback(url);
-      }
-
-      return json({ success: true, service: FUNCTION_NAME, status: "healthy" });
-    }
-
-    if (req.method !== "POST") {
-      return json({ success: false, error: "Method not allowed. Use POST." }, 405);
-    }
-
-    if (!SUPABASE_URL || !SERVICE_ROLE) {
-      return json(
-        { success: false, error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing." },
-        500
-      );
-    }
-
-    const body = await parseBody(req);
-    const url = new URL(req.url);
-
-    // Provider and action can come from query params (OAuth redirects) or body (API calls)
-    const provider = normalizeProvider(
-      body.provider || url.searchParams.get("provider")
-    );
-    const action = body.action || url.searchParams.get("action");
-    const organization_id = body.organization_id || url.searchParams.get("organization_id");
-
-    if (!organization_id && provider !== "quickbooks") {
-      return json({ success: false, error: "organization_id is required." }, 400);
-    }
-
-    if (!provider) {
-      return json({ success: false, error: "provider is required." }, 400);
-    }
-
-    // Blocked providers
-    if (provider === "finaloop") {
-      return json({ success: false, error: "Finaloop is not supported." }, 400);
-    }
-    if (provider === "openai") {
-      return json(
-        { success: false, error: "OpenAI is a platform service and is not user-configurable." },
-        400
-      );
-    }
-    if (["make", "gusto", "melio"].includes(provider)) {
-      return json({ success: false, error: `${provider} is not part of BETA integrations.` }, 400);
-    }
-
-    // QuickBooks OAuth actions
-    if (provider === "quickbooks") {
-      if (!QB_CLIENT_ID || !QB_CLIENT_SECRET) {
-        return json(
-          { success: false, error: "QuickBooks OAuth credentials are not configured." },
-          500
+      const { error } = await supabase
+        .from('integration_qb_mappings')
+        .upsert(
+          { organization_id: orgId, ...mapping, updated_at: new Date().toISOString() },
+          { onConflict: 'organization_id' }
         );
-      }
-
-      switch (action) {
-        case "connect":
-          // redirectToIntuit=true when called from the browser directly
-          return await handleQBConnect(organization_id!, body.redirect === true);
-        case "callback":
-          return await handleQBCallback(url);
-        case "disconnect":
-          return await handleQBDisconnect(organization_id!);
-        case "refresh":
-          return await handleQBRefresh(organization_id!);
-        default:
-          return json(
-            {
-              success: false,
-              error: `Unknown QuickBooks action: "${action}". Valid actions: connect, callback, disconnect, refresh.`,
-            },
-            400
-          );
-      }
+      if (error) throw error;
+      await logActivity(orgId, userId, 'Updated QuickBooks data mapping', 'integration_qb_mappings');
+      onSuccess();
+    } catch (err: any) {
+      alert(`Failed to save mapping: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
+  };
 
-    // Existing providers
-    if (provider === "shipstation") return await configureShipStation(body);
-    if (provider === "a2x") return await configureA2XGuidance(body);
+  // Group mapping fields by section
+  const sections = QB_MAPPING_FIELDS.reduce<Record<string, typeof QB_MAPPING_FIELDS>>((acc, f) => {
+    if (!acc[f.section]) acc[f.section] = [];
+    acc[f.section].push(f);
+    return acc;
+  }, {});
 
-    return await configureGeneric(body, provider);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown integration-configure error.";
-    console.error("integration-configure error:", message);
-    return json({ success: false, error: message }, 500);
-  }
-});
+  return (
+    <div className="fixed inset-0 bg-black/20 z-50 flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(0,0,0,0.06)]">
+          <div>
+            <h3 className="text-[15px] font-semibold text-gray-900">QuickBooks — Map Data</h3>
+            <p className="text-[12px] text-gray-500 mt-0.5">Match deryv data to your chart of accounts</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+
+          {loadingAccounts && (
+            <div className="flex items-center gap-2 text-[13px] text-gray-400 py-4">
+              <Loader2 size={14} className="animate-spin" />
+              Loading your QuickBooks accounts...
+            </div>
+          )}
+
+          {accountsError && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-[12px] text-red-600 space-y-1.5">
+              <p className="font-medium">Could not load QuickBooks accounts</p>
+              <p className="text-red-500">{
+                accountsError.includes('token') || accountsError.includes('401') || accountsError.includes('auth')
+                  ? 'Your QuickBooks session has expired. Please disconnect and reconnect.'
+                  : accountsError.includes('not found') || accountsError.includes('404')
+                  ? 'No QuickBooks connection found. Please connect QuickBooks first.'
+                  : 'An error occurred fetching your chart of accounts. Try closing and reopening.'
+              }</p>
+              <button className="underline text-red-600" onClick={onClose}>Close</button>
+            </div>
+          )}
+
+          {/* Account mapping sections */}
+          {!loadingAccounts && !accountsError && Object.entries(sections).map(([section, fields]) => (
+            <div key={section}>
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">{section}</p>
+              <div className="space-y-3">
+                {fields.map(field => {
+                  const options = getOptionsForField(field.key);
+                  return (
+                    <div key={field.key}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div>
+                          <p className="text-[13px] font-medium text-gray-900">{field.label}</p>
+                          <p className="text-[11px] text-gray-400">{field.description}</p>
+                        </div>
+                      </div>
+                      <select
+                        value={mapping[field.key] ?? ''}
+                        onChange={e => setMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
+                        className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] bg-white"
+                      >
+                        <option value="">— Select account —</option>
+                        {options.map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                        {options.length === 0 && (
+                          <option disabled>No matching accounts found</option>
+                        )}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {/* Sync settings */}
+          {!loadingAccounts && !accountsError && (
+            <div>
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Sync settings</p>
+              <div className="space-y-3">
+                {QB_SYNC_FIELDS.map(field => (
+                  <div key={field.key}>
+                    <p className="text-[13px] font-medium text-gray-900 mb-0.5">{field.label}</p>
+                    <p className="text-[11px] text-gray-400 mb-1">{field.description}</p>
+                    <select
+                      value={mapping[field.key] ?? ''}
+                      onChange={e => setMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] bg-white"
+                    >
+                      <option value="">— Select —</option>
+                      {field.options.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Info note */}
+          <div className="p-3 bg-gray-50 rounded-lg text-[11px] text-gray-500 leading-relaxed">
+            Account names are pulled live from your QuickBooks chart of accounts. Changes here affect future syncs only — existing QuickBooks entries are not modified.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
+          <p className="text-[11px] text-gray-400">
+            {lastSaved ? `Last saved: ${lastSaved}` : 'Not yet saved'}
+          </p>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || loadingAccounts}
+              className="px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[13px] text-white font-medium disabled:opacity-60"
+            >
+              {saving ? 'Saving...' : 'Save mapping'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Setup Drawer (credentials / OAuth input)
+// ---------------------------------------------------------------------------
+
+function SetupDrawer({ provider, name, type, orgId, userId, onClose, onSuccess, onOAuthContinue }: any) {
+  const [credentials, setCredentials] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('integration-configure', {
+        body: { organization_id: orgId, provider, user_id: userId, credentials },
+      });
+      if (error) throw error;
+      await logActivity(orgId, userId, `Configured ${name}`, 'integration_connections');
+      onSuccess();
+    } catch (err: any) {
+      alert(`Configuration failed: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleOAuthContinue = () => {
+    if (type === 'oauth_input' && provider === 'shopify') {
+      const shopDomain = credentials.shop_domain;
+      if (!shopDomain) { alert('Please enter your Shopify store domain'); return; }
+      onOAuthContinue?.(shopDomain);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(0,0,0,0.06)]">
+          <div>
+            <h3 className="text-[15px] font-semibold text-gray-900">Configure {name}</h3>
+            <p className="text-[12px] text-gray-500 mt-0.5">Enter your credentials to connect</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-6 py-4 space-y-4">
+          {type === 'oauth_input' && provider === 'shopify' && (
+            <div>
+              <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">Shopify Store Domain</label>
+              <input
+                type="text"
+                value={credentials.shop_domain ?? ''}
+                onChange={e => setCredentials({ ...credentials, shop_domain: e.target.value })}
+                className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
+                placeholder="your-store.myshopify.com"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">Enter your Shopify store domain</p>
+            </div>
+          )}
+          {type === 'credentials' && provider === 'shipstation' && (
+            <>
+              <div>
+                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">API Key</label>
+                <input type="password" value={credentials.api_key ?? ''} onChange={e => setCredentials({ ...credentials, api_key: e.target.value })} className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]" placeholder="Your ShipStation API key" />
+              </div>
+              <div>
+                <label className="text-[12px] font-medium text-gray-700 mb-1.5 block">API Secret</label>
+                <input type="password" value={credentials.api_secret ?? ''} onChange={e => setCredentials({ ...credentials, api_secret: e.target.value })} className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]" placeholder="Your ShipStation API secret" />
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
+          <button onClick={onClose} className="flex-1 px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">Cancel</button>
+          <button
+            onClick={type === 'oauth_input' ? handleOAuthContinue : handleSave}
+            disabled={saving}
+            className="flex-1 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[13px] text-white font-medium disabled:opacity-60"
+          >
+            {saving ? 'Saving...' : (type === 'oauth_input' ? 'Continue' : 'Save & Connect')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Events Drawer
+// ---------------------------------------------------------------------------
+
+function EventsDrawer({ provider, name, events, onClose }: any) {
+  const getEventIcon = (type: string, status: string) => {
+    if (status === 'success' || status === 'COMPLETED') return <CheckCircle size={14} className="text-green-600" />;
+    if (status === 'error' || status === 'FAILED') return <AlertTriangle size={14} className="text-red-600" />;
+    return <Clock size={14} className="text-gray-400" />;
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(0,0,0,0.06)]">
+          <div>
+            <h3 className="text-[15px] font-semibold text-gray-900">{name} Events</h3>
+            <p className="text-[12px] text-gray-500 mt-0.5">{events.length} recent events</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {events.length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <Clock size={20} className="text-gray-200 mx-auto mb-2" />
+              <p className="text-[13px] text-gray-400">No events yet</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[rgba(0,0,0,0.04)]">
+              {events.map((event: any, idx: number) => (
+                <div key={event.id ?? idx} className="px-6 py-3 hover:bg-gray-50">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5">{getEventIcon(event.event_type, event.status)}</div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-medium text-gray-900">{event.event_type.replace(/_/g, ' ')}</p>
+                      {event.error_message && <p className="text-[12px] text-red-600 mt-0.5">{event.error_message}</p>}
+                      <p className="text-[11px] text-gray-400 mt-1">{new Date(event.created_at).toLocaleString()}</p>
+                    </div>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                      event.status === 'success' || event.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {event.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
+          <button onClick={onClose} className="w-full px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// eBay Settings Drawer
+// ---------------------------------------------------------------------------
+
+function EbaySettingsDrawer({ orgId, userId, onClose, onSuccess }: {
+  orgId: string;
+  userId: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [step, setStep] = useState<'instructions' | 'form'>('instructions');
+
+  useState(() => {
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('integration_connections')
+          .select('config')
+          .eq('organization_id', orgId)
+          .eq('provider', 'ebay')
+          .maybeSingle();
+
+        if (data?.config) {
+          setSettings({
+            fulfillment_policy_id: data.config.fulfillment_policy_id ?? '',
+            payment_policy_id: data.config.payment_policy_id ?? '',
+            return_policy_id: data.config.return_policy_id ?? '',
+            default_category_id: data.config.default_category_id ?? '',
+          });
+          // Skip instructions if already configured
+          if (data.config.fulfillment_policy_id) setStep('form');
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
+  });
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { data: existing } = await supabase
+        .from('integration_connections')
+        .select('config')
+        .eq('organization_id', orgId)
+        .eq('provider', 'ebay')
+        .maybeSingle();
+
+      const { error } = await supabase
+        .from('integration_connections')
+        .update({
+          config: {
+            ...(existing?.config ?? {}),
+            fulfillment_policy_id: settings.fulfillment_policy_id ?? '',
+            payment_policy_id: settings.payment_policy_id ?? '',
+            return_policy_id: settings.return_policy_id ?? '',
+            default_category_id: settings.default_category_id ?? '',
+            policies_configured_at: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('organization_id', orgId)
+        .eq('provider', 'ebay');
+
+      if (error) throw error;
+      await logActivity(orgId, userId, 'Updated eBay business policy settings', 'integration_connections');
+      onSuccess();
+    } catch (err: any) {
+      alert(`Failed to save: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const INSTRUCTIONS = [
+    {
+      step: 1,
+      title: 'Log in to your eBay seller account',
+      detail: 'Go to ebay.com and sign in with your seller account — not your developer account.',
+    },
+    {
+      step: 2,
+      title: 'Open Business Policies',
+      detail: 'Go to My eBay → Account → Business policies, or visit ebay.com/sh/settings/business-policies directly.',
+    },
+    {
+      step: 3,
+      title: 'Create or find your Shipping policy',
+      detail: 'Click the Shipping tab. Create a new policy if you don\'t have one, or click Edit on an existing one. The policy ID appears in the page URL as a long number (e.g. ...policyId=12345678901234).',
+    },
+    {
+      step: 4,
+      title: 'Get your Payment policy ID',
+      detail: 'Click the Payment tab and repeat — copy the policy ID from the URL when editing.',
+    },
+    {
+      step: 5,
+      title: 'Get your Returns policy ID',
+      detail: 'Click the Returns tab and do the same.',
+    },
+    {
+      step: 6,
+      title: 'Enter the IDs below',
+      detail: 'Paste each numeric policy ID into the corresponding field on the next screen.',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/20 z-50 flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(0,0,0,0.06)]">
+          <div>
+            <h3 className="text-[15px] font-semibold text-gray-900">eBay — Configure</h3>
+            <p className="text-[12px] text-gray-500 mt-0.5">
+              {step === 'instructions' ? 'How to find your eBay policy IDs' : 'Enter your eBay business policy IDs'}
+            </p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {loading ? (
+            <div className="flex items-center gap-2 text-[13px] text-gray-400 py-4">
+              <Loader2 size={14} className="animate-spin" />Loading...
+            </div>
+          ) : step === 'instructions' ? (
+            <div className="space-y-4">
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-[12px] text-blue-700 leading-relaxed">
+                eBay requires every listing to have a Shipping, Payment, and Returns policy. These are set up in your eBay seller account and take about 5 minutes to configure.
+              </div>
+              <div className="space-y-3">
+                {INSTRUCTIONS.map(item => (
+                  <div key={item.step} className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-gray-900 text-white text-[11px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">
+                      {item.step}
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-medium text-gray-900">{item.title}</p>
+                      <p className="text-[12px] text-gray-500 mt-0.5 leading-relaxed">{item.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <a
+                href="https://www.ebay.com/sh/settings/business-policies"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-[12px] text-blue-600 hover:underline mt-2"
+              >
+                <ExternalLink size={11} />
+                Open eBay Business Policies
+              </a>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-3 bg-gray-50 rounded-lg text-[12px] text-gray-500 leading-relaxed">
+                Enter the numeric policy IDs from your eBay seller account. Each ID is a long number found in the URL when editing a policy.
+              </div>
+
+              {[
+                { key: 'fulfillment_policy_id', label: 'Shipping policy ID', placeholder: 'e.g. 12345678901234', help: 'From Business Policies → Shipping tab' },
+                { key: 'payment_policy_id', label: 'Payment policy ID', placeholder: 'e.g. 12345678901234', help: 'From Business Policies → Payment tab' },
+                { key: 'return_policy_id', label: 'Returns policy ID', placeholder: 'e.g. 12345678901234', help: 'From Business Policies → Returns tab' },
+                { key: 'default_category_id', label: 'Default eBay category ID (optional)', placeholder: 'e.g. 9355', help: 'Leave blank to use Electronics › Other as default. Find IDs at developer.ebay.com/devzone/xml/docs/reference/ebay/GetCategories.html' },
+              ].map(field => (
+                <div key={field.key}>
+                  <label className="text-[12px] font-medium text-gray-700 mb-1 block">{field.label}</label>
+                  <input
+                    type="text"
+                    value={settings[field.key] ?? ''}
+                    onChange={e => setSettings(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    className="w-full px-3 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px]"
+                    placeholder={field.placeholder}
+                  />
+                  <p className="text-[11px] text-gray-400 mt-0.5">{field.help}</p>
+                </div>
+              ))}
+
+              <button
+                onClick={() => setStep('instructions')}
+                className="text-[12px] text-blue-600 hover:underline flex items-center gap-1"
+              >
+                ← Back to instructions
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-[rgba(0,0,0,0.06)]">
+          {step === 'instructions' ? (
+            <>
+              <button onClick={onClose} className="px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={() => setStep('form')}
+                className="px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-lg text-[13px] text-white font-medium"
+              >
+                I have my policy IDs →
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={onClose} className="px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || !settings.fulfillment_policy_id || !settings.payment_policy_id || !settings.return_policy_id}
+                className="px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[13px] text-white font-medium disabled:opacity-60"
+              >
+                {saving ? 'Saving...' : 'Save settings'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
