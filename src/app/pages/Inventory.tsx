@@ -29,7 +29,6 @@ function locationLabel(loc: any): string {
   return loc.location_code ?? ([loc.zone, loc.rack, loc.shelf, loc.bin].filter(Boolean).join('-') || '—');
 }
 
-// Show the human lot_id from the join; fall back to UUID prefix only if missing
 function lotLabel(item: any): string {
   const humanId = item.lots?.lot_id;
   if (humanId) return `#${humanId.toUpperCase()}`;
@@ -175,7 +174,6 @@ export function Inventory() {
     }
   }, [searchParams, setSearchParams]);
 
-  // Drawer state
   const [selected, setSelected] = useState<any>(null);
   const [editing, setEditing] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -187,17 +185,14 @@ export function Inventory() {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [notFoundMsg, setNotFoundMsg] = useState<string | null>(null);
 
-  // Scanner state
   const [scanInput, setScanInput] = useState('');
   const [scanning, setScanning] = useState(false);
 
-  // Component attachment state
   const [showAddComponent, setShowAddComponent] = useState(false);
   const [addCompForm, setAddCompForm] = useState({ component_id: '', quantity: '1' });
   const [addCompSaving, setAddCompSaving] = useState(false);
   const [addCompError, setAddCompError] = useState<string | null>(null);
 
-  // Label state
   const [labelItem, setLabelItem] = useState<any>(null);
   const [labelSize, setLabelSize] = useState<'2x1' | '4x6'>('2x1');
   const [labelCopied, setLabelCopied] = useState(false);
@@ -281,7 +276,6 @@ export function Inventory() {
     return true;
   });
 
-  // Selection helpers
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -298,7 +292,6 @@ export function Inventory() {
     }
   };
 
-  // Open drawer
   const openItem = useCallback((item: any) => {
     setSelected(item);
     setEditing(false);
@@ -309,7 +302,6 @@ export function Inventory() {
     setConfirm(null);
   }, []);
 
-  // Close drawer
   const closeDrawer = () => {
     setSelected(null);
     setEditing(false);
@@ -320,7 +312,6 @@ export function Inventory() {
     setConfirm(null);
   };
 
-  // Deep-link: track pending ?selected=<uuid> via ref so param removal doesn't re-trigger
   const pendingSelId = useRef<string | null>(searchParams.get('selected'));
   useEffect(() => {
     const id = searchParams.get('selected');
@@ -340,7 +331,6 @@ export function Inventory() {
     setSearchParams(p => { p.delete('selected'); return p; }, { replace: true });
   }, [items, loading, openItem, setSearchParams]);
 
-  // Start editing
   const startEdit = (item: any) => {
     setEditForm({
       product_title: item.product_title ?? '',
@@ -367,7 +357,6 @@ export function Inventory() {
 
   const setEF = (k: string, v: string) => setEditForm((f: any) => ({ ...f, [k]: v }));
 
-  // Save edit — keep drawer open with fresh joined data
   const saveEdit = async () => {
     if (!editForm.product_title) { setDrawerError('Title is required.'); return; }
     setSaving(true); setDrawerError(null);
@@ -398,7 +387,6 @@ export function Inventory() {
     if (fresh) setSelected(fresh);
   };
 
-  // Save move
   const saveMove = async () => {
     if (!moveLocationId) { setDrawerError('Select a destination location.'); return; }
     setSaving(true); setDrawerError(null);
@@ -413,7 +401,6 @@ export function Inventory() {
     closeDrawer();
   };
 
-  // Mark scrapped
   const markScrapped = async () => {
     setConfirmLoading(true);
     const { error: err } = await updateRow('inventory_items', selected.id, { status: 'SCRAPPED' });
@@ -424,7 +411,6 @@ export function Inventory() {
     closeDrawer();
   };
 
-  // Mark damaged
   const markDamaged = async () => {
     setConfirmLoading(true);
     const { error: err } = await updateRow('inventory_items', selected.id, { status: 'DAMAGED' });
@@ -435,7 +421,6 @@ export function Inventory() {
     closeDrawer();
   };
 
-  // Delete with dependency check across all linked tables
   const handleDeleteCheck = async () => {
     setDrawerError(null);
     const [ordCount, retCount, compCount, supCount] = await Promise.all([
@@ -466,36 +451,25 @@ export function Inventory() {
     closeDrawer();
   };
 
-  // Label: save barcode_value + label_generated_at
-  // Scanner: handle scanned QR URL, inventory_id, or barcode_value
   const handleScan = async () => {
     if (!scanInput.trim() || scanning) return;
-
     setScanning(true);
     const input = scanInput.trim();
     let itemId = null;
-
     try {
-      // Check if input contains selected=<uuid>
       const selectedMatch = input.match(/selected=([a-f0-9-]{36})/i);
       if (selectedMatch) {
         itemId = selectedMatch[1];
       } else {
-        // Look up by inventory_id or barcode_value
         const { data: foundItems, error } = await supabase
           .from('inventory_items')
           .select('id')
           .eq('organization_id', orgId)
           .or(`inventory_id.eq.${input},barcode_value.eq.${input}`);
-
         if (error) throw error;
-        if (foundItems && foundItems.length > 0) {
-          itemId = foundItems[0].id;
-        }
+        if (foundItems && foundItems.length > 0) itemId = foundItems[0].id;
       }
-
       if (itemId) {
-        // Navigate to the item
         setSearchParams(p => { p.set('selected', itemId); return p; });
         setScanInput('');
       } else {
@@ -518,19 +492,15 @@ export function Inventory() {
     });
   }, []);
 
-  // Label: copy QR URL
   const copyQrUrl = async (item: any) => {
     const url = qrUrlFor(item);
     try {
       await navigator.clipboard.writeText(url);
       setLabelCopied(true);
       setTimeout(() => setLabelCopied(false), 2000);
-    } catch {
-      // fallback
-    }
+    } catch {}
   };
 
-  // Label: print single from ref
   const printLabel = async () => {
     if (!labelRef.current || !labelItem) return;
     setLabelSaving(true);
@@ -548,7 +518,6 @@ export function Inventory() {
     setTimeout(() => { win.print(); win.close(); }, 300);
   };
 
-  // Label: batch print selected items
   const printBatch = () => {
     const itemsToPrint = filtered.filter((i: any) => selectedIds.has(i.id));
     if (!itemsToPrint.length) return;
@@ -557,7 +526,6 @@ export function Inventory() {
     setTimeout(async () => {
       const refs = batchRefs.current.filter(Boolean);
       if (!refs.length) return;
-      // Save label_generated_at for all
       await Promise.all(itemsToPrint.map(item => generateAndSave(item)));
       const pageSize = labelSize === '2x1' ? '2in 1in' : '4in 6in';
       const labels = refs.map(el => el!.outerHTML).join('');
@@ -574,96 +542,50 @@ export function Inventory() {
     }, 150);
   };
 
-  // Drawer subtitle
   const drawerSubtitle = selected
     ? ([selected.sku, selected.brand].filter(Boolean).join(' ') || '—')
     : '';
 
-  // Drawer footer
   const drawerFooter = selected && (
     <div className="flex flex-wrap gap-2">
       {!editing && !moving && (
         <>
           {canEditOps(role) && (
-            <button
-              onClick={() => startEdit(selected)}
-              className="px-3 py-1.5 text-[13px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg"
-            >
-              Edit
-            </button>
+            <button onClick={() => startEdit(selected)} className="px-3 py-1.5 text-[13px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg">Edit</button>
           )}
           {canEditOps(role) && (
-            <button
-              onClick={() => { setMoving(true); setEditing(false); setDrawerError(null); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-gray-700 rounded-lg hover:bg-gray-50"
-            >
+            <button onClick={() => { setMoving(true); setEditing(false); setDrawerError(null); }} className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-gray-700 rounded-lg hover:bg-gray-50">
               <MapPin size={12} />Move Item
             </button>
           )}
-          <button
-            onClick={() => { setLabelItem(selected); setLabelCopied(false); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-gray-700 rounded-lg hover:bg-gray-50"
-          >
+          <button onClick={() => { setLabelItem(selected); setLabelCopied(false); }} className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-gray-700 rounded-lg hover:bg-gray-50">
             <Tag size={12} />Generate Label
           </button>
           {canEditOps(role) && (
-            <button
-              onClick={() => setConfirm({ type: 'scrapped' })}
-              className="px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-amber-700 rounded-lg hover:bg-amber-50"
-            >
-              Mark Scrapped
-            </button>
+            <button onClick={() => setConfirm({ type: 'scrapped' })} className="px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-amber-700 rounded-lg hover:bg-amber-50">Mark Scrapped</button>
           )}
           {canEditOps(role) && (
-            <button
-              onClick={() => setConfirm({ type: 'damaged' })}
-              className="px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-orange-700 rounded-lg hover:bg-orange-50"
-            >
-              Mark Damaged
-            </button>
+            <button onClick={() => setConfirm({ type: 'damaged' })} className="px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-orange-700 rounded-lg hover:bg-orange-50">Mark Damaged</button>
           )}
           {isAdmin(role) && (
-            <button
-              onClick={handleDeleteCheck}
-              className="px-3 py-1.5 text-[13px] font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 ml-auto"
-            >
-              Delete
-            </button>
+            <button onClick={handleDeleteCheck} className="px-3 py-1.5 text-[13px] font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 ml-auto">Delete</button>
           )}
         </>
       )}
       {editing && (
         <>
-          <button
-            onClick={saveEdit}
-            disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg disabled:opacity-60"
-          >
+          <button onClick={saveEdit} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg disabled:opacity-60">
             {saving && <Loader2 size={12} className="animate-spin" />}Save
           </button>
-          <button
-            onClick={() => { setEditing(false); setDrawerError(null); }}
-            className="px-3 py-1.5 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50"
-          >
-            Cancel
-          </button>
+          <button onClick={() => { setEditing(false); setDrawerError(null); }} className="px-3 py-1.5 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
         </>
       )}
       {moving && (
         <>
-          <button
-            onClick={saveMove}
-            disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg disabled:opacity-60"
-          >
+          <button onClick={saveMove} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg disabled:opacity-60">
             {saving && <Loader2 size={12} className="animate-spin" />}Save Move
           </button>
-          <button
-            onClick={() => { setMoving(false); setMoveLocationId(''); setDrawerError(null); }}
-            className="px-3 py-1.5 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50"
-          >
-            Cancel
-          </button>
+          <button onClick={() => { setMoving(false); setMoveLocationId(''); setDrawerError(null); }} className="px-3 py-1.5 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
         </>
       )}
     </div>
@@ -682,32 +604,20 @@ export function Inventory() {
     if (qty < 1) { setAddCompError('Quantity must be at least 1.'); return; }
     const comp = allComponents.find((c: any) => c.id === addCompForm.component_id);
     if (!comp) return;
-    if ((comp.quantity_available ?? 0) < qty) {
-      setAddCompError(`Insufficient stock: only ${comp.quantity_available ?? 0} available.`);
-      return;
-    }
+    if ((comp.quantity_available ?? 0) < qty) { setAddCompError(`Insufficient stock: only ${comp.quantity_available ?? 0} available.`); return; }
     setAddCompSaving(true); setAddCompError(null);
-
     const { error: e1 } = await insertRow('inventory_item_components', {
-      organization_id: orgId,
-      inventory_item_id: selected.id,
-      component_id: comp.id,
-      quantity: qty,
-      unit_cost: comp.unit_cost ?? 0,
-      total_cost: (comp.unit_cost ?? 0) * qty,
-      attached_by: user?.id ?? null,
+      organization_id: orgId, inventory_item_id: selected.id, component_id: comp.id,
+      quantity: qty, unit_cost: comp.unit_cost ?? 0, total_cost: (comp.unit_cost ?? 0) * qty, attached_by: user?.id ?? null,
     });
     if (e1) { setAddCompError(e1); setAddCompSaving(false); return; }
-
     const newAvailable = Math.max(0, (comp.quantity_available ?? 0) - qty);
     const { error: e2 } = await updateRow('components', comp.id, { quantity_available: newAvailable });
     if (e2) { setAddCompError(`Attached but failed to update component stock: ${e2}`); setAddCompSaving(false); return; }
-
     const newCompCost = Number(selected.component_cost ?? 0) + (Number(comp.unit_cost ?? 0) * qty);
     const newTotalCostBasis = Number(selected.weighted_acquisition_cost ?? 0) + newCompCost + Number(selected.supply_cost ?? 0) + Number(selected.shipping_cost ?? 0) + Number(selected.marketplace_fees ?? 0);
     const { error: e3 } = await updateRow('inventory_items', selected.id, { component_cost: newCompCost, total_cost_basis: newTotalCostBasis });
     if (e3) { setAddCompError(`Attached but failed to update item cost: ${e3}`); setAddCompSaving(false); return; }
-
     await logActivity(orgId!, user?.id!, `Component "${comp.name}" ×${qty} attached to "${selected.product_title}"`, 'inventory_item_components');
     setShowAddComponent(false);
     setAddCompForm({ component_id: '', quantity: '1' });
@@ -720,35 +630,33 @@ export function Inventory() {
   const removeComponent = async (ic: any) => {
     const qty = Number(ic.quantity ?? 1);
     const unitCost = Number(ic.components?.unit_cost ?? ic.unit_cost ?? 0);
-
     const { error: e1 } = await deleteRow('inventory_item_components', ic.id);
     if (e1) { setDrawerError(`Failed to remove component: ${e1}`); return; }
-
     const comp = allComponents.find((c: any) => c.id === ic.component_id);
     if (comp) {
       const { error: e2 } = await updateRow('components', comp.id, { quantity_available: (comp.quantity_available ?? 0) + qty });
       if (e2) console.error('Failed to restore component quantity:', e2);
     }
-
     const newCompCost = Math.max(0, Number(selected.component_cost ?? 0) - unitCost * qty);
     const newTotalCostBasis = Number(selected.weighted_acquisition_cost ?? 0) + newCompCost + Number(selected.supply_cost ?? 0) + Number(selected.shipping_cost ?? 0) + Number(selected.marketplace_fees ?? 0);
     const { error: e3 } = await updateRow('inventory_items', selected.id, { component_cost: newCompCost, total_cost_basis: newTotalCostBasis });
     if (e3) { setDrawerError(`Component removed but failed to update item cost: ${e3}`); }
-
     await logActivity(orgId!, user?.id!, `Component "${ic.components?.name}" removed from "${selected.product_title}"`, 'inventory_item_components');
     await reloadComponents();
     reload();
     await refreshSelected(selected.id);
   };
 
-  // Label preview scale - fit to container
-  const labelNativeW = labelSize === '2x1' ? 192 : 384; // 2in = 192px, 4in = 384px at 96dpi
-  const labelNativeH = labelSize === '2x1' ? 96 : 576; // 1in = 96px, 6in = 576px at 96dpi
-  const containerW = 600; // Available width in preview area
-  const containerH = 400; // Available height in preview area
+  // Label preview scale — reserves correct layout space so label doesn't overflow
+  const labelNativeW = labelSize === '2x1' ? 192 : 384;
+  const labelNativeH = labelSize === '2x1' ? 96 : 576;
+  const containerW = 460;
+  const containerH = labelSize === '2x1' ? 300 : 500;
   const scaleW = containerW / labelNativeW;
   const scaleH = containerH / labelNativeH;
-  const previewScale = Math.min(scaleW, scaleH, 3); // Max scale of 3 to prevent over-enlargement
+  const previewScale = Math.min(scaleW, scaleH, 2.5);
+  const scaledW = Math.round(labelNativeW * previewScale);
+  const scaledH = Math.round(labelNativeH * previewScale);
 
   return (
     <div className="p-6 max-w-[1400px] space-y-4">
@@ -775,45 +683,26 @@ export function Inventory() {
         <div className="px-4 py-3 border-b border-[rgba(0,0,0,0.06)] flex items-center gap-3">
           <div className="relative flex-1 max-w-xs">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search by title or SKU..."
-              className="pl-7 pr-3 py-1.5 text-[13px] bg-gray-50 border border-[rgba(0,0,0,0.08)] rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] placeholder:text-gray-400"
-            />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by title or SKU..."
+              className="pl-7 pr-3 py-1.5 text-[13px] bg-gray-50 border border-[rgba(0,0,0,0.08)] rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] placeholder:text-gray-400" />
           </div>
-
           <div className="relative flex-1 max-w-sm">
             <ScanLine size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#3ECF8E]" />
-            <input
-              value={scanInput}
-              onChange={e => setScanInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleScan()}
-              placeholder="Scan QR code or inventory ID..."
-              disabled={scanning}
-              className="pl-7 pr-16 py-1.5 text-[13px] bg-[#F0FDF4] border border-[#3ECF8E]/20 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/30 focus:border-[#3ECF8E] placeholder:text-gray-500 disabled:opacity-60"
-            />
+            <input value={scanInput} onChange={e => setScanInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleScan()}
+              placeholder="Scan QR code or inventory ID..." disabled={scanning}
+              className="pl-7 pr-16 py-1.5 text-[13px] bg-[#F0FDF4] border border-[#3ECF8E]/20 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/30 focus:border-[#3ECF8E] placeholder:text-gray-500 disabled:opacity-60" />
             {scanInput && (
-              <button
-                onClick={handleScan}
-                disabled={scanning}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[11px] font-medium bg-[#3ECF8E] text-white rounded hover:bg-[#38c484] disabled:opacity-60 transition-colors"
-              >
+              <button onClick={handleScan} disabled={scanning}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[11px] font-medium bg-[#3ECF8E] text-white rounded hover:bg-[#38c484] disabled:opacity-60 transition-colors">
                 {scanning ? <Loader2 size={10} className="animate-spin" /> : 'Scan'}
               </button>
             )}
           </div>
-
           {selectedIds.size > 0 && (
-            <button
-              onClick={printBatch}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors"
-            >
-              <Printer size={12} />
-              Print Labels ({selectedIds.size})
+            <button onClick={printBatch} className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors">
+              <Printer size={12} />Print Labels ({selectedIds.size})
             </button>
           )}
-
           <span className="text-[12px] text-gray-400 ml-auto">{filtered.length} items</span>
           <div className="flex border border-[rgba(0,0,0,0.1)] rounded-lg overflow-hidden">
             <button onClick={() => setGridMode(false)} className={`p-1.5 ${!gridMode ? 'bg-gray-100' : 'hover:bg-gray-50'}`}><List size={13} className="text-gray-500" /></button>
@@ -824,39 +713,23 @@ export function Inventory() {
 
         {loading ? (
           <div className="divide-y divide-[rgba(0,0,0,0.04)]">
-            {[1, 2, 3, 4, 5].map(i => (
-              <div key={i} className="h-12 px-5 py-3 flex items-center">
-                <div className="h-4 w-48 bg-gray-100 animate-pulse rounded" />
-              </div>
-            ))}
+            {[1,2,3,4,5].map(i => <div key={i} className="h-12 px-5 py-3 flex items-center"><div className="h-4 w-48 bg-gray-100 animate-pulse rounded" /></div>)}
           </div>
         ) : error ? (
           <ErrorState message={error} onRetry={reload} />
         ) : filtered.length === 0 ? (
-          <EmptyState
-            title="No inventory items"
-            description={search ? 'Try a different search.' : 'Add your first inventory item.'}
-            action={!search && canEditOps(role) ? { label: 'Add Item', onClick: () => setShowAdd(true) } : undefined}
-          />
+          <EmptyState title="No inventory items" description={search ? 'Try a different search.' : 'Add your first inventory item.'} action={!search && canEditOps(role) ? { label: 'Add Item', onClick: () => setShowAdd(true) } : undefined} />
         ) : gridMode ? (
           <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {filtered.map((item: any) => (
-              <div
-                key={item.id ?? item.inventory_id}
-                onClick={() => openItem(item)}
-                className="border border-[rgba(0,0,0,0.07)] rounded-xl p-3 hover:border-[rgba(0,0,0,0.15)] transition-colors cursor-pointer"
-              >
+              <div key={item.id ?? item.inventory_id} onClick={() => openItem(item)} className="border border-[rgba(0,0,0,0.07)] rounded-xl p-3 hover:border-[rgba(0,0,0,0.15)] transition-colors cursor-pointer">
                 <div className="flex items-start justify-between mb-2">
-                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>
-                    Grade {item.grade ?? '?'}
-                  </span>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>Grade {item.grade ?? '?'}</span>
                   <StatusBadge status={item.status} size="sm" />
                 </div>
                 <p className="text-[13px] font-medium text-gray-900 leading-snug">{item.product_title}</p>
                 <p className="text-[11px] text-gray-400 mt-1">{item.brand ?? ''}</p>
-                <p className="text-[13px] font-semibold text-gray-900 mt-2">
-                  ${Number(item.current_asking_price || 0).toFixed(0)}
-                </p>
+                <p className="text-[13px] font-semibold text-gray-900 mt-2">${Number(item.current_asking_price || 0).toFixed(0)}</p>
               </div>
             ))}
           </div>
@@ -866,12 +739,7 @@ export function Inventory() {
               <thead>
                 <tr className="border-b border-[rgba(0,0,0,0.06)]">
                   <th className="pl-4 pr-2 py-2.5 w-8">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleSelectAll}
-                      className="w-3.5 h-3.5 accent-gray-800 cursor-pointer"
-                    />
+                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
                   </th>
                   {['SKU', 'Title', 'Brand', 'Grade', 'Status', 'Asking Price', 'Location', 'LOT'].map(h => (
                     <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
@@ -880,36 +748,20 @@ export function Inventory() {
               </thead>
               <tbody>
                 {filtered.map((item: any, i: number) => (
-                  <tr
-                    key={item.id ?? item.inventory_id}
-                    className={`hover:bg-gray-50/70 ${i < filtered.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
-                  >
+                  <tr key={item.id ?? item.inventory_id} className={`hover:bg-gray-50/70 ${i < filtered.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
                     <td className="pl-4 pr-2 py-3 w-8" onClick={e => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(item.id)}
-                        onChange={() => toggleSelect(item.id)}
-                        className="w-3.5 h-3.5 accent-gray-800 cursor-pointer"
-                      />
+                      <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
                     </td>
                     <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{item.sku ?? '—'}</td>
                     <td className="px-5 py-3 text-[13px] font-medium text-gray-900 max-w-[240px] truncate cursor-pointer" onClick={() => openItem(item)}>{item.product_title}</td>
                     <td className="px-5 py-3 text-[13px] text-gray-600 cursor-pointer" onClick={() => openItem(item)}>{item.brand ?? '—'}</td>
                     <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}>
-                      <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>
-                        {item.grade ? `Grade ${item.grade}` : '—'}
-                      </span>
+                      <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>{item.grade ? `Grade ${item.grade}` : '—'}</span>
                     </td>
                     <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}><StatusBadge status={item.status} size="sm" /></td>
-                    <td className="px-5 py-3 text-[13px] text-gray-700 tabular-nums cursor-pointer" onClick={() => openItem(item)}>
-                      ${Number(item.current_asking_price || 0).toFixed(0)}
-                    </td>
-                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 whitespace-nowrap cursor-pointer" onClick={() => openItem(item)}>
-                      {locationLabel(item.warehouse_locations)}
-                    </td>
-                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>
-                      {lotLabel(item)}
-                    </td>
+                    <td className="px-5 py-3 text-[13px] text-gray-700 tabular-nums cursor-pointer" onClick={() => openItem(item)}>${Number(item.current_asking_price || 0).toFixed(0)}</td>
+                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 whitespace-nowrap cursor-pointer" onClick={() => openItem(item)}>{locationLabel(item.warehouse_locations)}</td>
+                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{lotLabel(item)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -918,141 +770,72 @@ export function Inventory() {
         )}
       </div>
 
-      {/* Add modal */}
-      <AddInventoryModal
-        open={showAdd}
-        onClose={() => setShowAdd(false)}
-        orgId={orgId}
-        userId={user?.id}
-        lots={lots}
-        locations={locations}
-        onCreated={reload}
-      />
+      <AddInventoryModal open={showAdd} onClose={() => setShowAdd(false)} orgId={orgId} userId={user?.id} lots={lots} locations={locations} onCreated={reload} />
 
-      {/* Detail / Edit Drawer */}
-      <Drawer
-        open={!!selected}
-        onClose={closeDrawer}
-        title={selected?.product_title ?? ''}
-        subtitle={drawerSubtitle}
-        footer={drawerFooter}
-      >
+      <Drawer open={!!selected} onClose={closeDrawer} title={selected?.product_title ?? ''} subtitle={drawerSubtitle} footer={drawerFooter}>
         {selected && (
           <div className="space-y-4">
-            {/* Badges row */}
             <div className="flex items-center gap-2 flex-wrap">
               <StatusBadge status={selected.status} />
-              {selected.grade && (
-                <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${conditionColor(selected.grade)}`}>
-                  Grade {selected.grade}
-                </span>
-              )}
+              {selected.grade && <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${conditionColor(selected.grade)}`}>Grade {selected.grade}</span>}
               {selected.label_generated_at && (
                 <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1">
-                  <Tag size={9} />
-                  Label generated {new Date(selected.label_generated_at).toLocaleDateString()}
+                  <Tag size={9} />Label generated {new Date(selected.label_generated_at).toLocaleDateString()}
                 </span>
               )}
             </div>
-
-            {/* Error */}
-            {drawerError && (
-              <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{drawerError}</p>
-            )}
-
-            {/* Move mode */}
+            {drawerError && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{drawerError}</p>}
             {moving && (
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-3">
                 <p className="text-[13px] font-medium text-blue-900">Select destination location</p>
-                <select
-                  className={selectCls}
-                  value={moveLocationId}
-                  onChange={e => setMoveLocationId(e.target.value)}
-                >
+                <select className={selectCls} value={moveLocationId} onChange={e => setMoveLocationId(e.target.value)}>
                   <option value="">— Select location —</option>
-                  {locations.map((l: any) => (
-                    <option key={l.id} value={l.id}>{locationLabel(l)}</option>
-                  ))}
+                  {locations.map((l: any) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
                 </select>
               </div>
             )}
-
-            {/* Edit mode */}
             {editing ? (
               <div className="space-y-3">
-                <FormField label="Product Title" required>
-                  <input className={inputCls} value={editForm.product_title} onChange={e => setEF('product_title', e.target.value)} />
-                </FormField>
+                <FormField label="Product Title" required><input className={inputCls} value={editForm.product_title} onChange={e => setEF('product_title', e.target.value)} /></FormField>
                 <div className="grid grid-cols-2 gap-3">
-                  <FormField label="SKU">
-                    <input className={inputCls} value={editForm.sku} onChange={e => setEF('sku', e.target.value)} />
-                  </FormField>
-                  <FormField label="UPC">
-                    <input className={inputCls} value={editForm.upc} onChange={e => setEF('upc', e.target.value)} />
-                  </FormField>
+                  <FormField label="SKU"><input className={inputCls} value={editForm.sku} onChange={e => setEF('sku', e.target.value)} /></FormField>
+                  <FormField label="UPC"><input className={inputCls} value={editForm.upc} onChange={e => setEF('upc', e.target.value)} /></FormField>
                 </div>
-                <FormField label="Serial Number">
-                  <input className={inputCls} value={editForm.serial_number} onChange={e => setEF('serial_number', e.target.value)} />
-                </FormField>
+                <FormField label="Serial Number"><input className={inputCls} value={editForm.serial_number} onChange={e => setEF('serial_number', e.target.value)} /></FormField>
                 <div className="grid grid-cols-2 gap-3">
-                  <FormField label="Brand">
-                    <input className={inputCls} value={editForm.brand} onChange={e => setEF('brand', e.target.value)} />
-                  </FormField>
-                  <FormField label="Category">
-                    <input className={inputCls} value={editForm.category} onChange={e => setEF('category', e.target.value)} />
-                  </FormField>
+                  <FormField label="Brand"><input className={inputCls} value={editForm.brand} onChange={e => setEF('brand', e.target.value)} /></FormField>
+                  <FormField label="Category"><input className={inputCls} value={editForm.category} onChange={e => setEF('category', e.target.value)} /></FormField>
                 </div>
-                <FormField label="Model">
-                  <input className={inputCls} value={editForm.model} onChange={e => setEF('model', e.target.value)} />
-                </FormField>
+                <FormField label="Model"><input className={inputCls} value={editForm.model} onChange={e => setEF('model', e.target.value)} /></FormField>
                 <div className="grid grid-cols-2 gap-3">
                   <FormField label="Grade">
-                    <select className={selectCls} value={editForm.grade} onChange={e => setEF('grade', e.target.value)}>
-                      {GRADES.map(g => <option key={g}>{g}</option>)}
-                    </select>
+                    <select className={selectCls} value={editForm.grade} onChange={e => setEF('grade', e.target.value)}>{GRADES.map(g => <option key={g}>{g}</option>)}</select>
                   </FormField>
                   <FormField label="Status">
-                    <select className={selectCls} value={editForm.status} onChange={e => setEF('status', e.target.value)}>
-                      {INV_STATUSES.map(s => <option key={s}>{s}</option>)}
-                    </select>
+                    <select className={selectCls} value={editForm.status} onChange={e => setEF('status', e.target.value)}>{INV_STATUSES.map(s => <option key={s}>{s}</option>)}</select>
                   </FormField>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <FormField label="MSRP ($)">
-                    <input type="number" className={inputCls} value={editForm.msrp} onChange={e => setEF('msrp', e.target.value)} min="0" step="0.01" />
-                  </FormField>
-                  <FormField label="Asking Price ($)">
-                    <input type="number" className={inputCls} value={editForm.current_asking_price} onChange={e => setEF('current_asking_price', e.target.value)} min="0" step="0.01" />
-                  </FormField>
-                  <FormField label="Acq. Cost ($)">
-                    <input type="number" className={inputCls} value={editForm.weighted_acquisition_cost} onChange={e => setEF('weighted_acquisition_cost', e.target.value)} min="0" step="0.01" />
-                  </FormField>
+                  <FormField label="MSRP ($)"><input type="number" className={inputCls} value={editForm.msrp} onChange={e => setEF('msrp', e.target.value)} min="0" step="0.01" /></FormField>
+                  <FormField label="Asking Price ($)"><input type="number" className={inputCls} value={editForm.current_asking_price} onChange={e => setEF('current_asking_price', e.target.value)} min="0" step="0.01" /></FormField>
+                  <FormField label="Acq. Cost ($)"><input type="number" className={inputCls} value={editForm.weighted_acquisition_cost} onChange={e => setEF('weighted_acquisition_cost', e.target.value)} min="0" step="0.01" /></FormField>
                 </div>
                 <FormField label="Location">
                   <select className={selectCls} value={editForm.warehouse_location_id} onChange={e => setEF('warehouse_location_id', e.target.value)}>
                     <option value="">— No location —</option>
-                    {locations.map((l: any) => (
-                      <option key={l.id} value={l.id}>{locationLabel(l)}</option>
-                    ))}
+                    {locations.map((l: any) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
                   </select>
                 </FormField>
                 <FormField label="LOT">
                   <select className={selectCls} value={editForm.lot_id} onChange={e => setEF('lot_id', e.target.value)}>
                     <option value="">— No LOT —</option>
-                    {lots.map((l: any) => (
-                      <option key={l.id} value={l.id}>#{l.lot_id ? l.lot_id.toUpperCase() : l.id.slice(0, 8).toUpperCase()}</option>
-                    ))}
+                    {lots.map((l: any) => <option key={l.id} value={l.id}>#{l.lot_id ? l.lot_id.toUpperCase() : l.id.slice(0, 8).toUpperCase()}</option>)}
                   </select>
                 </FormField>
-                <FormField label="Condition">
-                  <textarea className={textareaCls} rows={2} value={editForm.condition} onChange={e => setEF('condition', e.target.value)} />
-                </FormField>
-                <FormField label="Notes">
-                  <textarea className={textareaCls} rows={2} value={editForm.notes} onChange={e => setEF('notes', e.target.value)} />
-                </FormField>
+                <FormField label="Condition"><textarea className={textareaCls} rows={2} value={editForm.condition} onChange={e => setEF('condition', e.target.value)} /></FormField>
+                <FormField label="Notes"><textarea className={textareaCls} rows={2} value={editForm.notes} onChange={e => setEF('notes', e.target.value)} /></FormField>
               </div>
             ) : (
-              /* View mode */
               <div>
                 <DetailRow label="SKU" value={selected.sku} />
                 <DetailRow label="UPC" value={selected.upc} />
@@ -1063,45 +846,20 @@ export function Inventory() {
                 <DetailRow label="Condition" value={selected.condition} />
                 <DetailRow label="Grade" value={selected.grade} />
                 <DetailRow label="Status" value={<StatusBadge status={selected.status} size="sm" />} />
-                <DetailRow
-                  label="MSRP"
-                  value={selected.msrp != null ? `$${Number(selected.msrp).toFixed(2)}` : null}
-                />
-                <DetailRow
-                  label="Acquisition Cost"
-                  value={selected.weighted_acquisition_cost != null ? `$${Number(selected.weighted_acquisition_cost).toFixed(2)}` : null}
-                />
-                <DetailRow
-                  label="Asking Price"
-                  value={selected.current_asking_price != null ? `$${Number(selected.current_asking_price).toFixed(2)}` : null}
-                />
-                <DetailRow
-                  label="Location"
-                  value={locationLabel(selected.warehouse_locations)}
-                />
-                <DetailRow
-                  label="LOT"
-                  value={lotLabel(selected) !== '—' ? lotLabel(selected) : null}
-                />
+                <DetailRow label="MSRP" value={selected.msrp != null ? `$${Number(selected.msrp).toFixed(2)}` : null} />
+                <DetailRow label="Acquisition Cost" value={selected.weighted_acquisition_cost != null ? `$${Number(selected.weighted_acquisition_cost).toFixed(2)}` : null} />
+                <DetailRow label="Asking Price" value={selected.current_asking_price != null ? `$${Number(selected.current_asking_price).toFixed(2)}` : null} />
+                <DetailRow label="Location" value={locationLabel(selected.warehouse_locations)} />
+                <DetailRow label="LOT" value={lotLabel(selected) !== '—' ? lotLabel(selected) : null} />
                 <DetailRow label="Notes" value={selected.notes} />
-                <DetailRow
-                  label="Label Generated"
-                  value={selected.label_generated_at ? new Date(selected.label_generated_at).toLocaleDateString() : 'Never'}
-                />
-                <DetailRow
-                  label="Created"
-                  value={selected.created_at ? new Date(selected.created_at).toLocaleDateString() : null}
-                />
+                <DetailRow label="Label Generated" value={selected.label_generated_at ? new Date(selected.label_generated_at).toLocaleDateString() : 'Never'} />
+                <DetailRow label="Created" value={selected.created_at ? new Date(selected.created_at).toLocaleDateString() : null} />
 
-                {/* Components section */}
                 <div className="mt-4 pt-4 border-t border-[rgba(0,0,0,0.06)]">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Components</p>
                     {canEditOps(role) && (
-                      <button
-                        onClick={() => { setShowAddComponent(true); setAddCompError(null); setAddCompForm({ component_id: '', quantity: '1' }); }}
-                        className="flex items-center gap-1 text-[12px] text-[#3ECF8E] hover:text-[#38c484] font-medium"
-                      >
+                      <button onClick={() => { setShowAddComponent(true); setAddCompError(null); setAddCompForm({ component_id: '', quantity: '1' }); }} className="flex items-center gap-1 text-[12px] text-[#3ECF8E] hover:text-[#38c484] font-medium">
                         <Plus size={11} />Add
                       </button>
                     )}
@@ -1109,38 +867,18 @@ export function Inventory() {
                   {showAddComponent && (
                     <div className="mb-3 bg-gray-50 border border-[rgba(0,0,0,0.08)] rounded-xl p-3 space-y-2">
                       {addCompError && <p className="text-[12px] text-red-500">{addCompError}</p>}
-                      <select
-                        className={selectCls}
-                        value={addCompForm.component_id}
-                        onChange={e => setAddCompForm(f => ({ ...f, component_id: e.target.value }))}
-                      >
+                      <select className={selectCls} value={addCompForm.component_id} onChange={e => setAddCompForm(f => ({ ...f, component_id: e.target.value }))}>
                         <option value="">— Select component —</option>
                         {allComponents.filter((c: any) => (c.quantity_available ?? 0) > 0).map((c: any) => (
                           <option key={c.id} value={c.id}>{c.name}{c.sku ? ` (${c.sku})` : ''} — {c.quantity_available} avail.</option>
                         ))}
                       </select>
                       <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          className={`${inputCls} w-24`}
-                          value={addCompForm.quantity}
-                          onChange={e => setAddCompForm(f => ({ ...f, quantity: e.target.value }))}
-                          placeholder="Qty"
-                        />
-                        <button
-                          onClick={addComponent}
-                          disabled={addCompSaving}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg disabled:opacity-60"
-                        >
+                        <input type="number" min="1" className={`${inputCls} w-24`} value={addCompForm.quantity} onChange={e => setAddCompForm(f => ({ ...f, quantity: e.target.value }))} placeholder="Qty" />
+                        <button onClick={addComponent} disabled={addCompSaving} className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg disabled:opacity-60">
                           {addCompSaving && <Loader2 size={11} className="animate-spin" />}Attach
                         </button>
-                        <button
-                          onClick={() => setShowAddComponent(false)}
-                          className="px-3 py-1.5 text-[12px] text-gray-500 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-100"
-                        >
-                          Cancel
-                        </button>
+                        <button onClick={() => setShowAddComponent(false)} className="px-3 py-1.5 text-[12px] text-gray-500 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-100">Cancel</button>
                       </div>
                     </div>
                   )}
@@ -1154,19 +892,12 @@ export function Inventory() {
                           <div key={ic.id} className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-gray-50 group">
                             <div className="min-w-0">
                               <p className="text-[13px] text-gray-800 truncate">{ic.components?.name ?? ic.component_id}</p>
-                              <p className="text-[11px] text-gray-400">
-                                ×{ic.quantity} @ ${Number(ic.components?.unit_cost ?? ic.unit_cost ?? 0).toFixed(2)}
-                              </p>
+                              <p className="text-[11px] text-gray-400">×{ic.quantity} @ ${Number(ic.components?.unit_cost ?? ic.unit_cost ?? 0).toFixed(2)}</p>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
                               <span className="text-[12px] font-medium text-gray-700 tabular-nums">${lineTotal.toFixed(2)}</span>
                               {canEditOps(role) && (
-                                <button
-                                  onClick={() => removeComponent(ic)}
-                                  className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all"
-                                >
-                                  <X size={11} />
-                                </button>
+                                <button onClick={() => removeComponent(ic)} className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all"><X size={11} /></button>
                               )}
                             </div>
                           </div>
@@ -1182,7 +913,6 @@ export function Inventory() {
                   )}
                 </div>
 
-                {/* Cost Rollup */}
                 {(() => {
                   const acq = Number(selected.weighted_acquisition_cost ?? 0);
                   const comp = Number(selected.component_cost ?? 0);
@@ -1193,13 +923,7 @@ export function Inventory() {
                   return (
                     <div className="mt-3 bg-gray-50 rounded-xl px-4 py-3">
                       <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Cost Rollup</p>
-                      {([
-                        ['Acquisition Cost', acq],
-                        ['Component Cost', comp],
-                        ['Supply Cost', supply],
-                        ['Shipping Cost', ship],
-                        ['Marketplace Fees', fees],
-                      ] as [string, number][]).map(([label, val]) => (
+                      {([['Acquisition Cost', acq], ['Component Cost', comp], ['Supply Cost', supply], ['Shipping Cost', ship], ['Marketplace Fees', fees]] as [string, number][]).map(([label, val]) => (
                         <div key={label} className="flex justify-between py-0.5">
                           <span className="text-[12px] text-gray-500">{label}</span>
                           <span className="text-[12px] text-gray-700 tabular-nums">${val.toFixed(2)}</span>
@@ -1218,111 +942,57 @@ export function Inventory() {
         )}
       </Drawer>
 
-      {/* Confirm: Scrapped */}
-      <ConfirmDialog
-        open={confirm?.type === 'scrapped'}
-        title="Mark as Scrapped?"
-        description={`"${selected?.product_title}" will be marked SCRAPPED.`}
-        confirmLabel="Mark Scrapped"
-        onConfirm={markScrapped}
-        onCancel={() => setConfirm(null)}
-        loading={confirmLoading}
-      />
-
-      {/* Confirm: Damaged */}
-      <ConfirmDialog
-        open={confirm?.type === 'damaged'}
-        title="Mark as Damaged?"
-        description={`"${selected?.product_title}" will be marked DAMAGED.`}
-        confirmLabel="Mark Damaged"
-        onConfirm={markDamaged}
-        onCancel={() => setConfirm(null)}
-        loading={confirmLoading}
-      />
-
-      {/* Confirm: Delete */}
-      <ConfirmDialog
-        open={confirm?.type === 'delete'}
-        title="Delete Item?"
-        description={`This will permanently delete "${selected?.product_title}". This action cannot be undone.`}
-        confirmLabel="Delete"
-        danger
-        onConfirm={doDelete}
-        onCancel={() => setConfirm(null)}
-        loading={confirmLoading}
-      />
+      <ConfirmDialog open={confirm?.type === 'scrapped'} title="Mark as Scrapped?" description={`"${selected?.product_title}" will be marked SCRAPPED.`} confirmLabel="Mark Scrapped" onConfirm={markScrapped} onCancel={() => setConfirm(null)} loading={confirmLoading} />
+      <ConfirmDialog open={confirm?.type === 'damaged'} title="Mark as Damaged?" description={`"${selected?.product_title}" will be marked DAMAGED.`} confirmLabel="Mark Damaged" onConfirm={markDamaged} onCancel={() => setConfirm(null)} loading={confirmLoading} />
+      <ConfirmDialog open={confirm?.type === 'delete'} title="Delete Item?" description={`This will permanently delete "${selected?.product_title}". This action cannot be undone.`} confirmLabel="Delete" danger onConfirm={doDelete} onCancel={() => setConfirm(null)} loading={confirmLoading} />
 
       {/* Label Preview Modal */}
       {labelItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setLabelItem(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 flex flex-col overflow-hidden" style={{ maxHeight: '90vh' }}>
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-[rgba(0,0,0,0.07)] flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-gray-900">Inventory Label</h3>
                 <p className="text-[12px] text-gray-400 mt-0.5 truncate max-w-[340px]">{labelItem.product_title}</p>
               </div>
-              <button onClick={() => setLabelItem(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
-                <X size={16} />
-              </button>
+              <button onClick={() => setLabelItem(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X size={16} /></button>
             </div>
-
-            {/* Size toggle */}
             <div className="px-5 pt-4 flex-shrink-0">
               <div className="flex gap-1.5 bg-gray-100 p-1 rounded-lg w-fit">
                 {(['2x1', '4x6'] as const).map(sz => (
-                  <button
-                    key={sz}
-                    onClick={() => setLabelSize(sz)}
-                    className={`px-3 py-1 text-[12px] font-medium rounded-md transition-all ${labelSize === sz ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-                  >
+                  <button key={sz} onClick={() => setLabelSize(sz)}
+                    className={`px-3 py-1 text-[12px] font-medium rounded-md transition-all ${labelSize === sz ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
                     {sz === '2x1' ? '2″ × 1″' : '4″ × 6″'}
                   </button>
                 ))}
               </div>
             </div>
-
-            {/* Label preview */}
+            {/* Label preview — wrapper reserves exact scaled dimensions so label never clips */}
             <div className="flex-1 overflow-auto px-5 py-4">
-              <div className="flex justify-center items-center bg-gray-50 border border-dashed border-gray-200 rounded-xl p-8" style={{ minHeight: '400px' }}>
-                <div style={{ transform: `scale(${previewScale})`, transformOrigin: 'center', display: 'inline-block' }}>
-                  <InventoryLabel
-                    ref={labelRef}
-                    item={labelItem}
-                    size={labelSize}
-                    orgLogo={currentOrg?.logo_url}
-                    qrUrl={qrUrlFor(labelItem)}
-                  />
+              <div className="flex justify-center items-center bg-gray-50 border border-dashed border-gray-200 rounded-xl p-6">
+                <div style={{ width: `${scaledW}px`, height: `${scaledH}px`, position: 'relative', flexShrink: 0 }}>
+                  <div style={{ transform: `scale(${previewScale})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
+                    <InventoryLabel
+                      ref={labelRef}
+                      item={labelItem}
+                      size={labelSize}
+                      orgLogo={currentOrg?.logo_url}
+                      qrUrl={qrUrlFor(labelItem)}
+                    />
+                  </div>
                 </div>
               </div>
-              <p className="text-[11px] text-gray-400 text-center mt-2">
-                QR → {qrUrlFor(labelItem)}
-              </p>
+              <p className="text-[11px] text-gray-400 text-center mt-2">QR → {qrUrlFor(labelItem)}</p>
             </div>
-
-            {/* Footer actions */}
             <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-[rgba(0,0,0,0.07)] flex-shrink-0">
-              <button
-                onClick={() => setLabelItem(null)}
-                className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50"
-              >
-                Close
-              </button>
+              <button onClick={() => setLabelItem(null)} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Close</button>
               <div className="flex gap-2">
-                <button
-                  onClick={() => copyQrUrl(labelItem)}
-                  className="flex items-center gap-1.5 px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-                >
+                <button onClick={() => copyQrUrl(labelItem)} className="flex items-center gap-1.5 px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
                   {labelCopied ? <><Check size={12} className="text-[#3ECF8E]" />Copied!</> : <><Copy size={12} />Copy QR URL</>}
                 </button>
-                <button
-                  onClick={printLabel}
-                  disabled={labelSaving}
-                  className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-60 transition-colors"
-                >
-                  {labelSaving ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
-                  Print Label
+                <button onClick={printLabel} disabled={labelSaving} className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-60 transition-colors">
+                  {labelSaving ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}Print Label
                 </button>
               </div>
             </div>
@@ -1330,17 +1000,9 @@ export function Inventory() {
         </div>
       )}
 
-      {/* Hidden batch print container */}
       <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', pointerEvents: 'none' }}>
         {batchPrintItems.map((item, i) => (
-          <InventoryLabel
-            key={item.id}
-            ref={(el: HTMLDivElement | null) => { batchRefs.current[i] = el; }}
-            item={item}
-            size={labelSize}
-            orgLogo={currentOrg?.logo_url}
-            qrUrl={qrUrlFor(item)}
-          />
+          <InventoryLabel key={item.id} ref={(el: HTMLDivElement | null) => { batchRefs.current[i] = el; }} item={item} size={labelSize} orgLogo={currentOrg?.logo_url} qrUrl={qrUrlFor(item)} />
         ))}
       </div>
     </div>

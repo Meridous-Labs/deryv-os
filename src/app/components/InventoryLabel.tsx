@@ -70,7 +70,7 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
               {orgLogo ? (
                 <img
                   src={orgLogo}
-                  style={{ height: '0.13in', width: 'auto', objectFit: 'contain', objectPosition: 'left center', display: 'block' }}
+                  style={{ height: '0.18in', width: 'auto', objectFit: 'contain', objectPosition: 'left center', display: 'block' }}
                   alt="logo"
                 />
               ) : (
@@ -123,7 +123,7 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
                 </span>
               )}
               {item.lot_id && (
-                <span style={{ fontSize: '0.065in', color: '#3ECF8E', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: '0.065in', color: '#111', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                   {lotShort}
                 </span>
               )}
@@ -193,7 +193,7 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
           ) : (
             <span style={{ fontSize: '0.2in', fontWeight: 800, color: '#111', letterSpacing: '0.06em' }}>deryv</span>
           )}
-          <span style={{ fontSize: '0.08in', color: '#aaa', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <span style={{ fontSize: '0.08in', color: '#555', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             Inventory Label
           </span>
         </div>
@@ -252,7 +252,7 @@ export const InventoryLabel = forwardRef<HTMLDivElement, InventoryLabelProps>(
             {item.status && (
               <div style={{ textAlign: 'center' }}>
                 <p style={{ fontSize: '0.065in', color: '#aaa', margin: '0 0 0.025in', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Status</p>
-                <p style={{ fontSize: '0.1in', fontWeight: 700, color: '#3ECF8E', margin: 0 }}>{item.status}</p>
+                <p style={{ fontSize: '0.1in', fontWeight: 700, color: '#111', margin: 0 }}>{item.status}</p>
               </div>
             )}
           </div>
