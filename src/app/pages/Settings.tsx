@@ -115,6 +115,20 @@ export function Settings() {
   const [invSaved, setInvSaved] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
 
+  // Warehouse address settings
+  const [warehouseForm, setWarehouseForm] = useState({
+    warehouse_name: (currentOrg as any)?.warehouse_name ?? '',
+    warehouse_street1: (currentOrg as any)?.warehouse_street1 ?? '',
+    warehouse_city: (currentOrg as any)?.warehouse_city ?? '',
+    warehouse_state: (currentOrg as any)?.warehouse_state ?? '',
+    warehouse_zip: (currentOrg as any)?.warehouse_zip ?? '',
+    warehouse_country: (currentOrg as any)?.warehouse_country ?? 'US',
+    warehouse_phone: (currentOrg as any)?.warehouse_phone ?? '',
+  });
+  const [savingWarehouse, setSavingWarehouse] = useState(false);
+  const [warehouseSaved, setWarehouseSaved] = useState(false);
+  const [warehouseError, setWarehouseError] = useState<string | null>(null);
+
   const { data: members, loading: membersLoading, error: membersError, reload: reloadMembers } = useOrgQuery<any>(
     'organization_members', orgId, { select: 'id, user_id, role, created_at' }
   );
@@ -159,7 +173,26 @@ export function Settings() {
     setTimeout(() => setBrandingSaved(false), 2500);
   };
 
-  const saveInventorySettings = async () => {
+  const saveWarehouseSettings = async () => {
+    if (!orgId) return;
+    setWarehouseError(null);
+    if (!warehouseForm.warehouse_zip) { setWarehouseError('ZIP code is required for shipping rate calculations.'); return; }
+    setSavingWarehouse(true);
+    const { error } = await supabase.from('organizations').update({
+      warehouse_name: warehouseForm.warehouse_name || null,
+      warehouse_street1: warehouseForm.warehouse_street1 || null,
+      warehouse_city: warehouseForm.warehouse_city || null,
+      warehouse_state: warehouseForm.warehouse_state || null,
+      warehouse_zip: warehouseForm.warehouse_zip || null,
+      warehouse_country: warehouseForm.warehouse_country || 'US',
+      warehouse_phone: warehouseForm.warehouse_phone || null,
+    }).eq('id', orgId);
+    setSavingWarehouse(false);
+    if (error) { setWarehouseError(error.message); return; }
+    await logActivity(orgId, user?.id!, 'Warehouse address updated', 'organizations', orgId, 'update');
+    setWarehouseSaved(true);
+    setTimeout(() => setWarehouseSaved(false), 2500);
+  };
     if (!orgId) return;
     setInvError(null);
     const prefix = invForm.inventory_prefix.trim().toUpperCase();
@@ -571,6 +604,60 @@ export function Settings() {
               <button onClick={saveInventorySettings} disabled={savingInv || currentRole !== 'admin'}
                 className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
                 {savingInv ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}Save Changes
+              </button>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* Warehouse Address */}
+      {view === 'warehouse' && (
+        <Section title="Warehouse Address">
+          <div className="space-y-5">
+            <div className="flex items-start gap-2 text-[12px] text-gray-500 bg-gray-50 border border-[rgba(0,0,0,0.07)] px-3 py-2.5 rounded-lg">
+              <Info size={13} className="flex-shrink-0 mt-px text-gray-400" />
+              <span>This address is used as the ship-from address for all ShipStation rate quotes and label creation. The ZIP code is required for rate calculations.</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="Warehouse / Location Name">
+                <input className={inputCls} value={warehouseForm.warehouse_name} onChange={e => setWarehouseForm(f => ({ ...f, warehouse_name: e.target.value }))} disabled={currentRole !== 'admin'} placeholder="Main Warehouse" />
+              </FormField>
+              <FormField label="Phone">
+                <input className={inputCls} value={warehouseForm.warehouse_phone} onChange={e => setWarehouseForm(f => ({ ...f, warehouse_phone: e.target.value }))} disabled={currentRole !== 'admin'} placeholder="555-0100" />
+              </FormField>
+            </div>
+            <FormField label="Street Address">
+              <input className={inputCls} value={warehouseForm.warehouse_street1} onChange={e => setWarehouseForm(f => ({ ...f, warehouse_street1: e.target.value }))} disabled={currentRole !== 'admin'} placeholder="123 Warehouse Blvd" />
+            </FormField>
+            <div className="grid grid-cols-3 gap-4">
+              <FormField label="City">
+                <input className={inputCls} value={warehouseForm.warehouse_city} onChange={e => setWarehouseForm(f => ({ ...f, warehouse_city: e.target.value }))} disabled={currentRole !== 'admin'} placeholder="Atlanta" />
+              </FormField>
+              <FormField label="State">
+                <input className={inputCls} value={warehouseForm.warehouse_state} onChange={e => setWarehouseForm(f => ({ ...f, warehouse_state: e.target.value }))} disabled={currentRole !== 'admin'} placeholder="GA" maxLength={2} />
+              </FormField>
+              <FormField label="ZIP *">
+                <input className={inputCls} value={warehouseForm.warehouse_zip} onChange={e => setWarehouseForm(f => ({ ...f, warehouse_zip: e.target.value }))} disabled={currentRole !== 'admin'} placeholder="30301" />
+              </FormField>
+            </div>
+            <FormField label="Country">
+              <select className={selectCls} value={warehouseForm.warehouse_country} onChange={e => setWarehouseForm(f => ({ ...f, warehouse_country: e.target.value }))} disabled={currentRole !== 'admin'}>
+                <option value="US">United States</option>
+                <option value="CA">Canada</option>
+                <option value="GB">United Kingdom</option>
+                <option value="AU">Australia</option>
+                <option value="MX">Mexico</option>
+              </select>
+            </FormField>
+            {warehouseError && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{warehouseError}</p>}
+            <div className="flex items-center justify-between pt-4 border-t border-[rgba(0,0,0,0.06)]">
+              <div className="flex items-center gap-3">
+                {currentRole !== 'admin' && <p className="text-[12px] text-gray-400">Admin access required.</p>}
+                {warehouseSaved && <span className="text-[12px] text-[#3ECF8E]">Saved</span>}
+              </div>
+              <button onClick={saveWarehouseSettings} disabled={savingWarehouse || currentRole !== 'admin'}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+                {savingWarehouse ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}Save Changes
               </button>
             </div>
           </div>
