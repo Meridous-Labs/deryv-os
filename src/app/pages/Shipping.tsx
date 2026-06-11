@@ -38,6 +38,31 @@ function CreateShipmentModal({ open, onClose, orgId, userId, orders, onCreated }
   const [error, setError] = useState<string | null>(null);
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
+  // Auto-fill dimensions from order's inventory items when order is selected
+  useEffect(() => {
+    if (!form.order_id) return;
+    const order = orders.find((o: any) => o.id === form.order_id);
+    if (!order?.order_items?.length) return;
+    // Sum weight across all items, take max dimensions
+    let totalWeight = 0;
+    let maxLength = 0, maxWidth = 0, maxHeight = 0;
+    for (const oi of order.order_items) {
+      const inv = oi.inventory_items;
+      if (!inv) continue;
+      if (inv.weight_oz) totalWeight += Number(inv.weight_oz) * (oi.quantity || 1);
+      if (inv.length_in) maxLength = Math.max(maxLength, Number(inv.length_in));
+      if (inv.width_in) maxWidth = Math.max(maxWidth, Number(inv.width_in));
+      if (inv.height_in) maxHeight = Math.max(maxHeight, Number(inv.height_in));
+    }
+    setForm(f => ({
+      ...f,
+      weight_oz: totalWeight > 0 ? String(totalWeight) : f.weight_oz,
+      length_in: maxLength > 0 ? String(maxLength) : f.length_in,
+      width_in: maxWidth > 0 ? String(maxWidth) : f.width_in,
+      height_in: maxHeight > 0 ? String(maxHeight) : f.height_in,
+    }));
+  }, [form.order_id]);
+
   const reset = () => setForm({ order_id: '', weight_oz: '', length_in: '', width_in: '', height_in: '', shipment_notes: '' });
 
   const save = async () => {
@@ -534,7 +559,7 @@ export function Shipping() {
   }, [shipments, setSearchParams]);
 
   const { data: orders } = useOrgQuery<any>('orders', orgId, {
-    select: 'id, order_id, buyer_name',
+    select: 'id, order_id, buyer_name, order_items(id, quantity, inventory_items(id, weight_oz, length_in, width_in, height_in))',
     filter: (q: any) => q.in('status', ['OPEN', 'PICKING', 'PACKED']),
   });
 
