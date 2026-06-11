@@ -173,6 +173,26 @@ export function Settings() {
     setTimeout(() => setBrandingSaved(false), 2500);
   };
 
+  const saveInventorySettings = async () => {
+    if (!orgId) return;
+    setInvError(null);
+    const prefix = invForm.inventory_prefix.trim().toUpperCase();
+    const seqStart = parseInt(invForm.inventory_seq_start);
+    if (!prefix || prefix.length < 1 || prefix.length > 10) { setInvError('Prefix must be 1–10 characters.'); return; }
+    if (!/^[A-Z0-9]+$/.test(prefix)) { setInvError('Prefix can only contain letters and numbers.'); return; }
+    if (isNaN(seqStart) || seqStart < 1) { setInvError('Starting number must be at least 1.'); return; }
+    setSavingInv(true);
+    const { error } = await supabase.from('organizations').update({
+      inventory_prefix: prefix,
+      inventory_seq_start: seqStart,
+    }).eq('id', orgId);
+    setSavingInv(false);
+    if (error) { setInvError(error.message); return; }
+    await logActivity(orgId, user?.id!, 'Inventory ID settings updated', 'organizations', orgId, 'update');
+    setInvSaved(true);
+    setTimeout(() => setInvSaved(false), 2500);
+  };
+
   const saveWarehouseSettings = async () => {
     if (!orgId) return;
     setWarehouseError(null);
@@ -192,30 +212,6 @@ export function Settings() {
     await logActivity(orgId, user?.id!, 'Warehouse address updated', 'organizations', orgId, 'update');
     setWarehouseSaved(true);
     setTimeout(() => setWarehouseSaved(false), 2500);
-  };
-    if (!orgId) return;
-    setInvError(null);
-    const prefix = invForm.inventory_prefix.trim().toUpperCase();
-    const seqStart = parseInt(invForm.inventory_seq_start);
-    if (!prefix || prefix.length < 1 || prefix.length > 10) {
-      setInvError('Prefix must be 1–10 characters.'); return;
-    }
-    if (!/^[A-Z0-9]+$/.test(prefix)) {
-      setInvError('Prefix can only contain letters and numbers.'); return;
-    }
-    if (isNaN(seqStart) || seqStart < 1) {
-      setInvError('Starting number must be at least 1.'); return;
-    }
-    setSavingInv(true);
-    const { error } = await supabase.from('organizations').update({
-      inventory_prefix: prefix,
-      inventory_seq_start: seqStart,
-    }).eq('id', orgId);
-    setSavingInv(false);
-    if (error) { setInvError(error.message); return; }
-    await logActivity(orgId, user?.id!, 'Inventory ID settings updated', 'organizations', orgId, 'update');
-    setInvSaved(true);
-    setTimeout(() => setInvSaved(false), 2500);
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
