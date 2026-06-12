@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, Eye, EyeOff, Loader2, Save, Upload, Info, Hash } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useOrgQuery, updateRow, deleteRow, logActivity } from '../../lib/hooks';
@@ -128,6 +128,20 @@ export function Settings() {
   const [savingWarehouse, setSavingWarehouse] = useState(false);
   const [warehouseSaved, setWarehouseSaved] = useState(false);
   const [warehouseError, setWarehouseError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentOrg) {
+      setWarehouseForm({
+        warehouse_name: (currentOrg as any)?.warehouse_name ?? '',
+        warehouse_street1: (currentOrg as any)?.warehouse_street1 ?? '',
+        warehouse_city: (currentOrg as any)?.warehouse_city ?? '',
+        warehouse_state: (currentOrg as any)?.warehouse_state ?? '',
+        warehouse_zip: (currentOrg as any)?.warehouse_zip ?? '',
+        warehouse_country: (currentOrg as any)?.warehouse_country ?? 'US',
+        warehouse_phone: (currentOrg as any)?.warehouse_phone ?? '',
+      });
+    }
+  }, [currentOrg]);
 
   const { data: members, loading: membersLoading, error: membersError, reload: reloadMembers } = useOrgQuery<any>(
     'organization_members', orgId, { select: 'id, user_id, role, created_at' }
