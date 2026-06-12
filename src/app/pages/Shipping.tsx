@@ -279,21 +279,29 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
     try {
       const { data, error } = await supabase.functions.invoke('shipstation-label', {
         body: {
-          action: 'create_label',
           organization_id: orgId,
           shipment_id: shipment.id,
           carrier_code: carrierCode,
           service_code: serviceCode,
         },
       });
-      if (error) throw error;
+      if (error) {
+        let detail = error.message;
+        try {
+          const body = await error.context?.json();
+          if (body?.error) detail = body.error;
+        } catch {}
+        throw new Error(detail);
+      }
       if (data.success) {
         setShowRates(false);
         setRates([]);
         await onUpdated();
+      } else {
+        throw new Error(data.error || 'Failed to create label');
       }
     } catch (err: any) {
-      setError(`Failed to create label: ${err.message}`);
+      setError(err.message || 'Failed to create label');
     } finally {
       setCreatingLabel(false);
     }
