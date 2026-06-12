@@ -15,6 +15,54 @@ import { supabase } from '../../lib/supabase';
 const SHIP_STATUSES = ['PENDING','LABEL_CREATED','PACKED','IN_TRANSIT','DELIVERED','EXCEPTION','LOST','RETURNED'];
 const FULFILLMENT_TYPES = ['SHIP', 'LOCAL_PICKUP', 'BUYER_ARRANGED'];
 const CARRIERS = ['UPS','FedEx','USPS','DHL','Other'];
+
+const CARRIER_LABELS: Record<string, string> = {
+  stamps_com: 'USPS',
+  ups: 'UPS',
+  ups_walleted: 'UPS',
+  fedex: 'FedEx',
+  fedex_walleted: 'FedEx',
+  dhl_express: 'DHL',
+  dhl_ecommerce: 'DHL',
+  globalpost: 'GlobalPost',
+};
+
+// Map technical/integration errors to plain-language messages for production users.
+// Falls back to a generic message rather than exposing raw API/SQL error text.
+function friendlyShippingError(raw: string): string {
+  const msg = (raw || '').toLowerCase();
+
+  if (msg.includes('insufficient') && msg.includes('balance')) {
+    return 'Your shipping carrier account has insufficient balance. Please add funds in ShipStation and try again.';
+  }
+  if (msg.includes('shipstation not connected') || msg.includes('not configured')) {
+    return 'Shipping isn\'t connected yet. Go to Integrations and connect ShipStation to enable rates and labels.';
+  }
+  if (msg.includes('warehouse') && (msg.includes('zip') || msg.includes('address'))) {
+    return 'Your warehouse address is incomplete. Go to Settings → Warehouse and add a complete address with ZIP code.';
+  }
+  if (msg.includes('ship-to') || msg.includes('shipping address') || msg.includes('incomplete') && msg.includes('address')) {
+    return 'This order is missing a complete shipping address. Edit the order to add the recipient\'s address.';
+  }
+  if (msg.includes('weight')) {
+    return 'Package weight is required before rates can be fetched. Edit the shipment to add weight.';
+  }
+  if (msg.includes('carrier_code') || msg.includes('service_code') || msg.includes('carriercode') || msg.includes('servicecode')) {
+    return 'Something went wrong selecting that shipping rate. Please try fetching rates again.';
+  }
+  if (msg.includes('no carriers configured')) {
+    return 'No shipping carriers are set up in ShipStation. Connect a carrier in your ShipStation account first.';
+  }
+  if (msg.includes('failed to fetch') || msg.includes('network') || msg.includes('failed to send a request')) {
+    return 'Couldn\'t reach the shipping service. Check your connection and try again, or contact support if this continues.';
+  }
+  if (msg.includes('unauthorized')) {
+    return 'Your session has expired. Please refresh the page and try again.';
+  }
+
+  // Generic fallback — never show raw stack traces, SQL, or provider JSON to users
+  return 'Something went wrong with this shipping request. Please try again, or contact support if the issue continues.';
+}
 const VIEW_STATUS: Record<string, string[]> = {
   'label-created': ['LABEL_CREATED'],
   'packed': ['PACKED'],
@@ -88,7 +136,7 @@ function CreateShipmentModal({ open, onClose, orgId, userId, orders, onCreated }
       height_in: isShip ? (parseFloat(form.height_in) || null) : null,
       shipment_notes: form.shipment_notes || null,
     });
-    if (err) { setError(err); setSaving(false); return; }
+    if (err) { setError('Failed to create shipment. Please try again or contact support.'); setSaving(false); return; }
     await logActivity(orgId, userId, `Shipment created (${form.fulfillment_type})`, 'shipments');
     setSaving(false); onCreated(); onClose(); reset();
   };
@@ -213,7 +261,7 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
       height_in: parseFloat(editForm.height_in) || null,
       shipment_notes: editForm.shipment_notes || null,
     });
-    if (err) { setError(err); setSaving(false); return; }
+    if (err) { setError('Failed to save shipment changes. Please try again or contact support.'); setSaving(false); return; }
 
     if (statusChanged && shipment.order_id) {
       if (editForm.status === 'IN_TRANSIT') await updateRow('orders', shipment.order_id, { status: 'SHIPPED' });
@@ -245,7 +293,7 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
     setConfirmLoading(false); setConfirm(null); onUpdated(); onClose();
   };
 
- const getRates = async () => {
+  const getRates = async () => {
     setLoadingRates(true); setError(null);
     try {
       const { data, error } = await supabase.functions.invoke('shipstation-rates', {
@@ -255,7 +303,6 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
         },
       });
       if (error) {
-        // Try to extract the actual error message returned by the function
         let detail = error.message;
         try {
           const body = await error.context?.json();
@@ -266,9 +313,9 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
       if (!data.success) throw new Error(data.error || 'Failed to fetch rates');
       setRates(data.rates ?? []);
       setShowRates(true);
-      if ((data.rates ?? []).length === 0) setError('No rates returned. Check that the shipping address and package weight are correct.');
+      if ((data.rates ?? []).length === 0) setError('No rates were returned for this shipment. Double-check the shipping address, weight, and dimensions.');
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch rates');
+      setError(friendlyShippingError(err.message));
     } finally {
       setLoadingRates(false);
     }
@@ -301,7 +348,7 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
         throw new Error(data.error || 'Failed to create label');
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to create label');
+      setError(friendlyShippingError(err.message));
     } finally {
       setCreatingLabel(false);
     }
@@ -497,15 +544,19 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
                       <div key={idx} className="p-3 bg-white border border-[rgba(0,0,0,0.08)] rounded-xl hover:border-[#3ECF8E]/40 transition-colors">
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            <p className="text-[13px] font-semibold text-gray-900">{rate.carrierCode?.toUpperCase()} — {rate.serviceName}</p>
+                            <p className="text-[13px] font-semibold text-gray-900">{CARRIER_LABELS[rate.carrierCode] || rate.carrierCode?.toUpperCase() || 'Carrier'} — {rate.serviceName}</p>
                             <div className="flex items-center gap-3 mt-0.5">
-                              {rate.deliveryDate && (
+                              {rate.deliveryDays ? (
                                 <p className="text-[11px] text-gray-500">
-                                  Est. delivery: <span className="font-medium text-gray-700">{new Date(rate.deliveryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                                  {rate.deliveryDays} business day{rate.deliveryDays !== 1 ? 's' : ''}
+                                  {rate.deliveryDate && ` · Arrives ${new Date(rate.deliveryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                                 </p>
-                              )}
-                              {rate.deliveryDays && !rate.deliveryDate && (
-                                <p className="text-[11px] text-gray-500">{rate.deliveryDays} business day{rate.deliveryDays !== 1 ? 's' : ''}</p>
+                              ) : rate.deliveryDate ? (
+                                <p className="text-[11px] text-gray-500">
+                                  Arrives <span className="font-medium text-gray-700">{new Date(rate.deliveryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                                </p>
+                              ) : (
+                                <p className="text-[11px] text-gray-400">Transit time unavailable</p>
                               )}
                             </div>
                           </div>
@@ -683,7 +734,7 @@ export function Shipping() {
       }
       setTimeout(() => scanInputRef.current?.focus(), 100);
     } catch (err: any) {
-      setScanError(`Scan error: ${err.message}`);
+      setScanError(friendlyShippingError(err.message));
       setTimeout(() => setScanError(null), 5000);
     } finally {
       setScanning(false);
