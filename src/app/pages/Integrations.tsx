@@ -24,6 +24,15 @@ const categoryMap: Record<string, string> = {
 function IntegrationIcon({ icon, initials }: { icon: string; initials: string }) {
   const [failed, setFailed] = useState(false);
 
+  // ShipStation isn't in Simple Icons — use local cropped brand icon
+  if (icon === 'shipstation') {
+    return (
+      <div className="w-9 h-9 rounded-xl bg-gray-50 border border-[rgba(0,0,0,0.06)] flex items-center justify-center flex-shrink-0 p-1.5">
+        <img src="https://byzjsafupehesiwbqkxt.supabase.co/storage/v1/object/public/icons/shipstation-icon.png" alt="" className="w-full h-full object-contain" />
+      </div>
+    );
+  }
+
   if (failed) {
     return (
       <div className="w-9 h-9 rounded-xl bg-gray-900 flex items-center justify-center text-white font-semibold text-[12px] flex-shrink-0">
