@@ -392,7 +392,23 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
   };
 
   const printLabel = () => {
-    if (shipment.label_url) window.open(shipment.label_url, '_blank');
+    if (!shipment.label_url) return;
+    try {
+      if (shipment.label_url.startsWith('http')) {
+        window.open(shipment.label_url, '_blank');
+        return;
+      }
+      const byteChars = atob(shipment.label_url);
+      const byteNumbers = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error('Failed to open label:', err);
+      setError('Couldn\'t open the shipping label. Try downloading it from ShipStation directly.');
+    }
   };
 
   const canEdit = canEditOps(role);
