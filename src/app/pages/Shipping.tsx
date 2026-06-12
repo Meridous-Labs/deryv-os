@@ -27,6 +27,43 @@ const CARRIER_LABELS: Record<string, string> = {
   globalpost: 'GlobalPost',
 };
 
+// Rough transit-time estimates by service name, based on published carrier guidelines.
+// These are typical ranges, not guarantees — actual transit varies by origin/destination.
+const TRANSIT_ESTIMATES: { match: RegExp; label: string }[] = [
+  { match: /priority mail express/i, label: '1 business day' },
+  { match: /next day/i, label: '1 business day' },
+  { match: /2nd day air|2 day/i, label: '2 business days' },
+  { match: /3 day select/i, label: '3 business days' },
+  { match: /priority mail/i, label: '1–3 business days' },
+  { match: /first[- ]?class/i, label: '1–5 business days' },
+  { match: /ground advantage/i, label: '2–5 business days' },
+  { match: /parcel select ground/i, label: '2–9 business days' },
+  { match: /ups ground/i, label: '1–5 business days' },
+  { match: /fedex ground/i, label: '1–5 business days' },
+  { match: /media mail/i, label: '2–8 business days' },
+  { match: /globalpost/i, label: '4–9 business days' },
+];
+
+function estimateTransit(serviceName: string): string | null {
+  for (const { match, label } of TRANSIT_ESTIMATES) {
+    if (match.test(serviceName)) return label;
+  }
+  return null;
+}
+
+// Convert ShipStation service codes like "usps_first_class_mail" into "USPS First Class Mail"
+function formatServiceCode(code: string): string {
+  if (!code) return '';
+  return code
+    .split('_')
+    .map(w => {
+      const upper = w.toUpperCase();
+      if (['USPS', 'UPS', 'DHL', 'FEDEX'].includes(upper)) return upper === 'FEDEX' ? 'FedEx' : upper;
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(' ');
+}
+
 // Map technical/integration errors to plain-language messages for production users.
 // Falls back to a generic message rather than exposing raw API/SQL error text.
 function friendlyShippingError(raw: string): string {
@@ -486,8 +523,8 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
 
             <DetailRow label="Order" value={<span className="font-mono">{orderNum}</span>} />
             <DetailRow label="Status" value={<StatusBadge status={shipment.status} size="sm" />} />
-            {shipment.carrier && <DetailRow label="Carrier" value={shipment.carrier} />}
-            {shipment.service && <DetailRow label="Service" value={shipment.service} />}
+            {shipment.carrier && <DetailRow label="Carrier" value={CARRIER_LABELS[shipment.carrier] || shipment.carrier?.toUpperCase()} />}
+            {shipment.service && <DetailRow label="Service" value={formatServiceCode(shipment.service)} />}
             {shipment.tracking_number && (
               <DetailRow label="Tracking" value={
                 <a href={`https://www.google.com/search?q=${shipment.tracking_number}`} target="_blank" rel="noreferrer"
@@ -555,9 +592,14 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
                                 <p className="text-[11px] text-gray-500">
                                   Arrives <span className="font-medium text-gray-700">{new Date(rate.deliveryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                                 </p>
-                              ) : (
-                                <p className="text-[11px] text-gray-400">Transit time unavailable</p>
-                              )}
+                              ) : (() => {
+                                const est = estimateTransit(rate.serviceName || '');
+                                return est ? (
+                                  <p className="text-[11px] text-gray-500">~{est} <span className="text-gray-400">(typical)</span></p>
+                                ) : (
+                                  <p className="text-[11px] text-gray-400">Transit time unavailable</p>
+                                );
+                              })()}
                             </div>
                           </div>
                           <div className="flex items-center gap-3 flex-shrink-0">
@@ -786,7 +828,7 @@ export function Shipping() {
                       <td className="px-5 py-3 text-[12px] text-gray-600">
                         {shp.orders?.ship_to_name || shp.orders?.buyer_name || shp.orders?.customers?.name || '—'}
                       </td>
-                      <td className="px-5 py-3 text-[13px] text-gray-700">{shp.carrier || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-5 py-3 text-[13px] text-gray-700">{shp.carrier ? (CARRIER_LABELS[shp.carrier] || shp.carrier.toUpperCase()) : <span className="text-gray-300">—</span>}</td>
                       <td className="px-5 py-3">
                         {shp.tracking_number
                           ? <span className="text-[11px] font-mono text-gray-500">{shp.tracking_number.slice(0, 16)}…</span>
