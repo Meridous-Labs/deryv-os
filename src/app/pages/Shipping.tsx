@@ -12,7 +12,8 @@ import { canEditOps, isAdmin } from '../../lib/permissions';
 import { FilterBar, FilterValues, FilterDef } from '../components/FilterBar';
 import { supabase } from '../../lib/supabase';
 
-const SHIP_STATUSES = ['LABEL_CREATED','PACKED','IN_TRANSIT','DELIVERED','EXCEPTION','LOST','RETURNED'];
+const SHIP_STATUSES = ['PENDING','LABEL_CREATED','PACKED','IN_TRANSIT','DELIVERED','EXCEPTION','LOST','RETURNED'];
+const FULFILLMENT_TYPES = ['SHIP', 'LOCAL_PICKUP', 'BUYER_ARRANGED'];
 const CARRIERS = ['UPS','FedEx','USPS','DHL','Other'];
 const VIEW_STATUS: Record<string, string[]> = {
   'label-created': ['LABEL_CREATED'],
@@ -28,6 +29,7 @@ const VIEW_STATUS: Record<string, string[]> = {
 function CreateShipmentModal({ open, onClose, orgId, userId, orders, onCreated }: any) {
   const [form, setForm] = useState({
     order_id: '',
+    fulfillment_type: 'SHIP',
     weight_oz: '',
     length_in: '',
     width_in: '',
@@ -63,23 +65,31 @@ function CreateShipmentModal({ open, onClose, orgId, userId, orders, onCreated }
     }));
   }, [form.order_id]);
 
-  const reset = () => setForm({ order_id: '', weight_oz: '', length_in: '', width_in: '', height_in: '', shipment_notes: '' });
+  const reset = () => setForm({ order_id: '', fulfillment_type: 'SHIP', weight_oz: '', length_in: '', width_in: '', height_in: '', shipment_notes: '' });
 
   const save = async () => {
     if (!form.order_id) { setError('An order is required.'); return; }
     setSaving(true); setError(null);
+
+    // Non-ship fulfillment types don't need weight/dimensions
+    const isShip = form.fulfillment_type === 'SHIP';
+    const initialStatus = form.fulfillment_type === 'LOCAL_PICKUP' ? 'LOCAL_PICKUP'
+      : form.fulfillment_type === 'BUYER_ARRANGED' ? 'BUYER_ARRANGED'
+      : 'PENDING';
+
     const { error: err } = await insertRow('shipments', {
       organization_id: orgId,
       order_id: form.order_id,
-      status: 'LABEL_CREATED',
-      weight_oz: parseFloat(form.weight_oz) || null,
-      length_in: parseFloat(form.length_in) || null,
-      width_in: parseFloat(form.width_in) || null,
-      height_in: parseFloat(form.height_in) || null,
+      status: initialStatus,
+      fulfillment_type: form.fulfillment_type,
+      weight_oz: isShip ? (parseFloat(form.weight_oz) || null) : null,
+      length_in: isShip ? (parseFloat(form.length_in) || null) : null,
+      width_in: isShip ? (parseFloat(form.width_in) || null) : null,
+      height_in: isShip ? (parseFloat(form.height_in) || null) : null,
       shipment_notes: form.shipment_notes || null,
     });
     if (err) { setError(err); setSaving(false); return; }
-    await logActivity(orgId, userId, 'Shipment created', 'shipments');
+    await logActivity(orgId, userId, `Shipment created (${form.fulfillment_type})`, 'shipments');
     setSaving(false); onCreated(); onClose(); reset();
   };
 
@@ -107,6 +117,15 @@ function CreateShipmentModal({ open, onClose, orgId, userId, orders, onCreated }
         </FormField>
 
         {/* Package dimensions */}
+        <FormField label="Fulfillment Type" required>
+          <select className={selectCls} value={form.fulfillment_type} onChange={e => set('fulfillment_type', e.target.value)}>
+            <option value="SHIP">Ship — Carrier Label</option>
+            <option value="LOCAL_PICKUP">Local Pickup</option>
+            <option value="BUYER_ARRANGED">Buyer Arranged Shipping</option>
+          </select>
+        </FormField>
+
+        {form.fulfillment_type === 'SHIP' && (
         <div>
           <label className="text-[11px] font-medium text-gray-500 mb-2 block uppercase tracking-wide">Package Dimensions (optional — required for rates)</label>
           <div className="grid grid-cols-2 gap-3">
@@ -124,6 +143,7 @@ function CreateShipmentModal({ open, onClose, orgId, userId, orders, onCreated }
             </FormField>
           </div>
         </div>
+        )}
 
         <FormField label="Notes">
           <textarea className={textareaCls} rows={2} value={form.shipment_notes} onChange={e => set('shipment_notes', e.target.value)} placeholder="Optional notes..." />
@@ -230,15 +250,15 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
     try {
       const { data, error } = await supabase.functions.invoke('shipstation-rates', {
         body: {
-          action: 'get_rates',
           organization_id: orgId,
           shipment_id: shipment.id,
         },
       });
       if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Failed to fetch rates');
       setRates(data.rates ?? []);
       setShowRates(true);
-      if ((data.rates ?? []).length === 0) setError('No rates returned. Check that the shipping address and package weight are set correctly.');
+      if ((data.rates ?? []).length === 0) setError('No rates returned. Check that the shipping address and package weight are correct.');
     } catch (err: any) {
       setError(`Failed to fetch rates: ${err.message}`);
     } finally {
