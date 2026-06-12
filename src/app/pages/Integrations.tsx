@@ -7,10 +7,10 @@ import { ErrorState } from '../components/DataStates';
 import { supabase } from '../../lib/supabase';
 
 const KNOWN_INTEGRATIONS = [
-  { id: 'shopify', name: 'Shopify', category: 'Marketplace', description: 'Sync inventory and orders with your Shopify storefront.', initials: 'SH', type: 'oauth' as const },
-  { id: 'ebay', name: 'eBay', category: 'Marketplace', description: 'List, manage and sync eBay listings automatically.', initials: 'eB', type: 'oauth' as const },
-  { id: 'shipstation', name: 'ShipStation', category: 'Shipping', description: 'Multi-carrier shipping and label management.', initials: 'SS', type: 'credentials' as const },
-  { id: 'quickbooks', name: 'QuickBooks', category: 'Accounting', description: 'Sync revenue, COGS, and expenses to QuickBooks Online.', initials: 'QB', type: 'oauth' as const },
+  { id: 'shopify', name: 'Shopify', category: 'Marketplace', description: 'Sync inventory and orders with your Shopify storefront.', initials: 'SH', icon: 'shopify', type: 'oauth' as const },
+  { id: 'ebay', name: 'eBay', category: 'Marketplace', description: 'List, manage and sync eBay listings automatically.', initials: 'eB', icon: 'ebay', type: 'oauth' as const },
+  { id: 'shipstation', name: 'ShipStation', category: 'Shipping', description: 'Multi-carrier shipping and label management.', initials: 'SS', icon: 'shipstation', type: 'credentials' as const },
+  { id: 'quickbooks', name: 'QuickBooks', category: 'Accounting', description: 'Sync revenue, COGS, and expenses to QuickBooks Online.', initials: 'QB', icon: 'quickbooks', type: 'oauth' as const },
 ];
 
 const categoryMap: Record<string, string> = {
@@ -18,6 +18,31 @@ const categoryMap: Record<string, string> = {
   shipping: 'Shipping',
   accounting: 'Accounting',
 };
+
+// Renders a brand icon via Simple Icons CDN with deryv's rounded-square container,
+// falling back to initials if the icon fails to load.
+function IntegrationIcon({ icon, initials }: { icon: string; initials: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div className="w-9 h-9 rounded-xl bg-gray-900 flex items-center justify-center text-white font-semibold text-[12px] flex-shrink-0">
+        {initials}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-9 h-9 rounded-xl bg-gray-50 border border-[rgba(0,0,0,0.06)] flex items-center justify-center flex-shrink-0 p-1.5">
+      <img
+        src={`https://cdn.simpleicons.org/${icon}`}
+        alt=""
+        className="w-full h-full object-contain"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
 
 export function Integrations() {
   const view = useSecondaryView();
@@ -199,9 +224,7 @@ export function Integrations() {
                   className={`bg-white rounded-xl border p-5 hover:shadow-sm transition-all ${isConnected ? 'border-[rgba(0,0,0,0.08)]' : 'border-[rgba(0,0,0,0.06)]'}`}>
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-gray-900 flex items-center justify-center text-white font-semibold text-[12px] flex-shrink-0">
-                        {integration.initials}
-                      </div>
+                      <IntegrationIcon icon={integration.icon} initials={integration.initials} />
                       <div>
                         <p className="text-[13px] font-semibold text-gray-900">{integration.name}</p>
                         <p className="text-[11px] text-gray-400">{integration.category}</p>
@@ -786,6 +809,8 @@ function EbaySettingsDrawer({ orgId, userId, onClose, onSuccess }: {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState<'instructions' | 'form'>('instructions');
+  const [autoCreating, setAutoCreating] = useState(false);
+  const [autoCreateError, setAutoCreateError] = useState<string | null>(null);
 
   useState(() => {
     (async () => {
@@ -849,6 +874,40 @@ function EbaySettingsDrawer({ orgId, userId, onClose, onSuccess }: {
     }
   };
 
+  const autoCreatePolicies = async () => {
+    setAutoCreating(true);
+    setAutoCreateError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('ebay-setup-policies', {
+        body: { organization_id: orgId },
+      });
+      if (error) {
+        let detail = error.message;
+        try {
+          const body = await error.context?.json();
+          if (body?.error) detail = body.error;
+        } catch {}
+        throw new Error(detail);
+      }
+      if (!data.success) throw new Error(data.error || 'Failed to create policies');
+
+      setSettings(prev => ({
+        ...prev,
+        fulfillment_policy_id: data.fulfillment_policy_id ?? prev.fulfillment_policy_id,
+        payment_policy_id: data.payment_policy_id ?? prev.payment_policy_id,
+        return_policy_id: data.return_policy_id ?? prev.return_policy_id,
+      }));
+      await logActivity(orgId, userId, 'Auto-created eBay business policies', 'integration_connections');
+      setStep('form');
+    } catch (err: any) {
+      setAutoCreateError(err.message || 'Failed to create policies automatically. You can enter your policy IDs manually below.');
+      setStep('form');
+    } finally {
+      setAutoCreating(false);
+    }
+  };
+
+
   const INSTRUCTIONS = [
     {
       step: 1,
@@ -910,6 +969,9 @@ function EbaySettingsDrawer({ orgId, userId, onClose, onSuccess }: {
               <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-[12px] text-blue-700 leading-relaxed">
                 eBay requires every listing to have a Shipping, Payment, and Returns policy. These are set up in your eBay seller account and take about 5 minutes to configure.
               </div>
+              <div className="p-3 bg-green-50 border border-green-100 rounded-lg text-[12px] text-green-700 leading-relaxed">
+                <strong>Quickest option:</strong> click "Auto-create policies for me" below and deryv will create standard policies on your eBay account automatically (free USPS Ground Advantage shipping, 30-day returns, standard payment terms). You can edit these anytime in eBay Seller Hub.
+              </div>
               <div className="space-y-3">
                 {INSTRUCTIONS.map(item => (
                   <div key={item.step} className="flex gap-3">
@@ -935,6 +997,11 @@ function EbaySettingsDrawer({ orgId, userId, onClose, onSuccess }: {
             </div>
           ) : (
             <div className="space-y-4">
+              {autoCreateError && (
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-[12px] text-amber-700 leading-relaxed">
+                  Couldn't auto-create policies: {autoCreateError}
+                </div>
+              )}
               <div className="p-3 bg-gray-50 rounded-lg text-[12px] text-gray-500 leading-relaxed">
                 Enter the numeric policy IDs from your eBay seller account. Each ID is a long number found in the URL when editing a policy.
               </div>
@@ -975,12 +1042,22 @@ function EbaySettingsDrawer({ orgId, userId, onClose, onSuccess }: {
               <button onClick={onClose} className="px-4 py-2 border border-[rgba(0,0,0,0.1)] rounded-lg text-[13px] text-gray-700 hover:bg-gray-50">
                 Cancel
               </button>
-              <button
-                onClick={() => setStep('form')}
-                className="px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-lg text-[13px] text-white font-medium"
-              >
-                I have my policy IDs →
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={autoCreatePolicies}
+                  disabled={autoCreating}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] rounded-lg text-[13px] text-white font-medium disabled:opacity-60"
+                >
+                  {autoCreating && <Loader2 size={12} className="animate-spin" />}
+                  {autoCreating ? 'Creating policies...' : 'Auto-create policies for me'}
+                </button>
+                <button
+                  onClick={() => setStep('form')}
+                  className="px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-lg text-[13px] text-white font-medium"
+                >
+                  I have my policy IDs →
+                </button>
+              </div>
             </>
           ) : (
             <>
