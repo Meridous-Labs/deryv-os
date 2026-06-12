@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadOrgMemberships = useCallback(async (userId: string) => {
     const { data, error } = await supabase
       .from('organization_members')
-      .select('organization_id, role, organizations(id, name, slug, plan, logo_url, accent_color, support_email, website)')
+      .select('organization_id, role, organizations(id, name, slug, plan, logo_url, accent_color, support_email, website, industry, inventory_prefix, inventory_seq_start, warehouse_name, warehouse_street1, warehouse_city, warehouse_state, warehouse_zip, warehouse_country, warehouse_phone)')
       .eq('user_id', userId);
 
     if (error) {
