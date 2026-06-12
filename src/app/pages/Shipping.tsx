@@ -245,7 +245,7 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
     setConfirmLoading(false); setConfirm(null); onUpdated(); onClose();
   };
 
-  const getRates = async () => {
+ const getRates = async () => {
     setLoadingRates(true); setError(null);
     try {
       const { data, error } = await supabase.functions.invoke('shipstation-rates', {
@@ -254,13 +254,21 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
           shipment_id: shipment.id,
         },
       });
-      if (error) throw error;
+      if (error) {
+        // Try to extract the actual error message returned by the function
+        let detail = error.message;
+        try {
+          const body = await error.context?.json();
+          if (body?.error) detail = body.error;
+        } catch {}
+        throw new Error(detail);
+      }
       if (!data.success) throw new Error(data.error || 'Failed to fetch rates');
       setRates(data.rates ?? []);
       setShowRates(true);
       if ((data.rates ?? []).length === 0) setError('No rates returned. Check that the shipping address and package weight are correct.');
     } catch (err: any) {
-      setError(`Failed to fetch rates: ${err.message}`);
+      setError(err.message || 'Failed to fetch rates');
     } finally {
       setLoadingRates(false);
     }
