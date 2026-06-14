@@ -470,7 +470,7 @@ export function LotIntake() {
   ) : null;
 
   return (
-    <div className="p-6 max-w-[1300px] space-y-4">
+    <div className="p-3 sm:p-6 max-w-[1300px] space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">LOT Intake</h2>

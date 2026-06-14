@@ -552,7 +552,7 @@ export function CommandCenter() {
   if (!orgId) return null;
 
   return (
-    <div className="p-6 max-w-[1300px] space-y-4">
+    <div className="p-3 sm:p-6 max-w-[1300px] space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[11px] text-gray-400 uppercase tracking-wide">{dateStr}</p>
@@ -566,7 +566,7 @@ export function CommandCenter() {
           <InlineError message={kpiError} onRetry={loadKpis} />
         </div>
       ) : (
-        <div className="grid grid-cols-3 lg:grid-cols-6 gap-px bg-[rgba(0,0,0,0.06)] rounded-xl overflow-hidden border border-[rgba(0,0,0,0.06)]">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px bg-[rgba(0,0,0,0.06)] rounded-xl overflow-hidden border border-[rgba(0,0,0,0.06)]">
           {kpiRows.map(kpi => (
             <KpiCell
               key={kpi.label}

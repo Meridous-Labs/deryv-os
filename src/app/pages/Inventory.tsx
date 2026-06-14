@@ -667,7 +667,7 @@ export function Inventory() {
   const scaledH = Math.round(labelNativeH * previewScale);
 
   return (
-    <div className="p-6 max-w-[1400px] space-y-4">
+    <div className="p-3 sm:p-6 max-w-[1400px] space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">Inventory</h2>
@@ -688,7 +688,7 @@ export function Inventory() {
       )}
 
       <div className="bg-white rounded-xl border border-[rgba(0,0,0,0.07)] overflow-hidden">
-        <div className="px-4 py-3 border-b border-[rgba(0,0,0,0.06)] flex items-center gap-3">
+        <div className="px-3 sm:px-4 py-3 border-b border-[rgba(0,0,0,0.06)] flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="relative flex-1 max-w-xs">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by title or SKU..."
@@ -742,39 +742,67 @@ export function Inventory() {
             ))}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                  <th className="pl-4 pr-2 py-2.5 w-8">
-                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
-                  </th>
-                  {['SKU', 'Title', 'Brand', 'Grade', 'Status', 'Asking Price', 'Location', 'LOT'].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((item: any, i: number) => (
-                  <tr key={item.id ?? item.inventory_id} className={`hover:bg-gray-50/70 ${i < filtered.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
-                    <td className="pl-4 pr-2 py-3 w-8" onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
-                    </td>
-                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{item.sku ?? '—'}</td>
-                    <td className="px-5 py-3 text-[13px] font-medium text-gray-900 max-w-[240px] truncate cursor-pointer" onClick={() => openItem(item)}>{item.product_title}</td>
-                    <td className="px-5 py-3 text-[13px] text-gray-600 cursor-pointer" onClick={() => openItem(item)}>{item.brand ?? '—'}</td>
-                    <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}>
-                      <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>{item.grade ? `Grade ${item.grade}` : '—'}</span>
-                    </td>
-                    <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}><StatusBadge status={item.status} size="sm" /></td>
-                    <td className="px-5 py-3 text-[13px] text-gray-700 tabular-nums cursor-pointer" onClick={() => openItem(item)}>${Number(item.current_asking_price || 0).toFixed(0)}</td>
-                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 whitespace-nowrap cursor-pointer" onClick={() => openItem(item)}>{locationLabel(item.warehouse_locations)}</td>
-                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{lotLabel(item)}</td>
+          <>
+            {/* Mobile card list */}
+            <div className="sm:hidden divide-y divide-[rgba(0,0,0,0.05)]">
+              {filtered.map((item: any) => (
+                <div key={item.id ?? item.inventory_id} onClick={() => openItem(item)}
+                  className="flex items-center gap-3 px-3 py-3 hover:bg-gray-50 active:bg-gray-100 cursor-pointer">
+                  <input type="checkbox" checked={selectedIds.has(item.id)}
+                    onChange={e => { e.stopPropagation(); toggleSelect(item.id); }}
+                    onClick={e => e.stopPropagation()}
+                    className="w-3.5 h-3.5 accent-gray-800 cursor-pointer flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-gray-900 truncate">{item.product_title}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">{[item.brand, item.sku].filter(Boolean).join(' · ') || '—'}</p>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <StatusBadge status={item.status} size="sm" />
+                      {item.grade && <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>Grade {item.grade}</span>}
+                      <span className="text-[11px] font-mono text-gray-400">{locationLabel(item.warehouse_locations)}</span>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <p className="text-[14px] font-semibold text-gray-900">${Number(item.current_asking_price || 0).toFixed(0)}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">{lotLabel(item)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[rgba(0,0,0,0.06)]">
+                    <th className="pl-4 pr-2 py-2.5 w-8">
+                      <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
+                    </th>
+                    {['SKU', 'Title', 'Brand', 'Grade', 'Status', 'Asking Price', 'Location', 'LOT'].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map((item: any, i: number) => (
+                    <tr key={item.id ?? item.inventory_id} className={`hover:bg-gray-50/70 ${i < filtered.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
+                      <td className="pl-4 pr-2 py-3 w-8" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
+                      </td>
+                      <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{item.sku ?? '—'}</td>
+                      <td className="px-5 py-3 text-[13px] font-medium text-gray-900 max-w-[240px] truncate cursor-pointer" onClick={() => openItem(item)}>{item.product_title}</td>
+                      <td className="px-5 py-3 text-[13px] text-gray-600 cursor-pointer" onClick={() => openItem(item)}>{item.brand ?? '—'}</td>
+                      <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}>
+                        <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>{item.grade ? `Grade ${item.grade}` : '—'}</span>
+                      </td>
+                      <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}><StatusBadge status={item.status} size="sm" /></td>
+                      <td className="px-5 py-3 text-[13px] text-gray-700 tabular-nums cursor-pointer" onClick={() => openItem(item)}>${Number(item.current_asking_price || 0).toFixed(0)}</td>
+                      <td className="px-5 py-3 text-[11px] font-mono text-gray-400 whitespace-nowrap cursor-pointer" onClick={() => openItem(item)}>{locationLabel(item.warehouse_locations)}</td>
+                      <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{lotLabel(item)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

@@ -596,7 +596,7 @@ export function Warehouse() {
   };
 
   return (
-    <div className="p-6 space-y-5 max-w-[1400px]">
+    <div className="p-3 sm:p-6 space-y-5 max-w-[1400px]">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">Warehouse</h2>

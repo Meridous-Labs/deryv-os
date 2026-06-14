@@ -573,7 +573,7 @@ export function Orders() {
   const selectedOrder = orders.find((o: any) => o.id === selectedId) ?? null;
 
   return (
-    <div className="p-6 max-w-[1300px] space-y-4">
+    <div className="p-3 sm:p-6 max-w-[1300px] space-y-4">
       {notFoundMsg && <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-[13px]">{notFoundMsg}</div>}
       <div className="flex items-center justify-between">
         <div>
@@ -601,30 +601,52 @@ export function Orders() {
         : filtered.length === 0 ? (
           <EmptyState title="No orders found" description={search ? 'Try a different search.' : 'Create your first order.'} action={!search ? { label: 'Create Order', onClick: () => setShowCreate(true) } : undefined} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                  {['Order #', 'Buyer', 'Channel', 'Status', 'Total', 'Date'].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((order: any, i: number) => (
-                  <tr key={order.id} onClick={() => setSelectedId(order.id)}
-                    className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === order.id ? 'bg-[#F0FDF4]' : ''} ${i < filtered.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
-                    <td className="px-5 py-3 text-[13px] font-mono font-medium text-gray-900">{order.order_id ? `#${order.order_id}` : `#${order.id.slice(0, 8).toUpperCase()}`}</td>
-                    <td className="px-5 py-3 text-[13px] text-gray-700">{order.buyer_name || order.customers?.name || '—'}</td>
-                    <td className="px-5 py-3"><span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{CHANNEL_LABEL[order.channel] ?? order.channel}</span></td>
-                    <td className="px-5 py-3"><StatusBadge status={order.status} size="sm" /></td>
-                    <td className="px-5 py-3 text-[13px] font-semibold text-gray-900 tabular-nums">${Number(order.total_amount || 0).toFixed(2)}</td>
-                    <td className="px-5 py-3 text-[12px] text-gray-400">{new Date(order.created_at).toLocaleDateString()}</td>
+          <>
+            {/* Mobile card list */}
+            <div className="sm:hidden divide-y divide-[rgba(0,0,0,0.05)]">
+              {filtered.map((order: any) => (
+                <div key={order.id} onClick={() => setSelectedId(order.id)}
+                  className={`px-3 py-3 hover:bg-gray-50 active:bg-gray-100 cursor-pointer ${selectedId === order.id ? 'bg-[#F0FDF4]' : ''}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-mono font-medium text-gray-900">{order.order_id ? `#${order.order_id}` : `#${order.id.slice(0, 8).toUpperCase()}`}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">{order.buyer_name || order.customers?.name || '—'} · {CHANNEL_LABEL[order.channel] ?? order.channel}</p>
+                    </div>
+                    <p className="text-[14px] font-semibold text-gray-900 flex-shrink-0">${Number(order.total_amount || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <StatusBadge status={order.status} size="sm" />
+                    <span className="text-[11px] text-gray-400">{new Date(order.created_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[rgba(0,0,0,0.06)]">
+                    {['Order #', 'Buyer', 'Channel', 'Status', 'Total', 'Date'].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map((order: any, i: number) => (
+                    <tr key={order.id} onClick={() => setSelectedId(order.id)}
+                      className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === order.id ? 'bg-[#F0FDF4]' : ''} ${i < filtered.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
+                      <td className="px-5 py-3 text-[13px] font-mono font-medium text-gray-900">{order.order_id ? `#${order.order_id}` : `#${order.id.slice(0, 8).toUpperCase()}`}</td>
+                      <td className="px-5 py-3 text-[13px] text-gray-700">{order.buyer_name || order.customers?.name || '—'}</td>
+                      <td className="px-5 py-3"><span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{CHANNEL_LABEL[order.channel] ?? order.channel}</span></td>
+                      <td className="px-5 py-3"><StatusBadge status={order.status} size="sm" /></td>
+                      <td className="px-5 py-3 text-[13px] font-semibold text-gray-900 tabular-nums">${Number(order.total_amount || 0).toFixed(2)}</td>
+                      <td className="px-5 py-3 text-[12px] text-gray-400">{new Date(order.created_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

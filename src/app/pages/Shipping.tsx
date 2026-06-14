@@ -800,7 +800,7 @@ export function Shipping() {
   };
 
   return (
-    <div className="p-6 max-w-[1300px] space-y-5">
+    <div className="p-3 sm:p-6 max-w-[1300px] space-y-5">
       {notFoundMsg && <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-[13px]">{notFoundMsg}</div>}
 
       <div className="flex items-center justify-between">
@@ -825,40 +825,67 @@ export function Shipping() {
           ) : error ? <ErrorState message={error} onRetry={reload} />
           : filteredShipments.length === 0 ? <EmptyState title="No shipments" description="Create a shipment to get started." action={{ label: 'Create Shipment', onClick: () => setShowCreate(true) }} />
           : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                    {['Order', 'Ship To', 'Carrier', 'Tracking', 'Status', 'Est. Delivery'].map(h => (
-                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredShipments.map((shp: any, i: number) => (
-                    <tr key={shp.id} onClick={() => setSelectedId(shp.id)}
-                      className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === shp.id ? 'bg-[#F0FDF4]' : ''} ${i < filteredShipments.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
-                      <td className="px-5 py-3 text-[12px] font-mono text-gray-700">
-                        {shp.orders ? (shp.orders.order_id ? `#${shp.orders.order_id}` : `#${shp.orders.id?.slice(0, 8).toUpperCase()}`) : '—'}
-                      </td>
-                      <td className="px-5 py-3 text-[12px] text-gray-600">
-                        {shp.orders?.ship_to_name || shp.orders?.buyer_name || shp.orders?.customers?.name || '—'}
-                      </td>
-                      <td className="px-5 py-3 text-[13px] text-gray-700">{shp.carrier ? (CARRIER_LABELS[shp.carrier] || shp.carrier.toUpperCase()) : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-5 py-3">
-                        {shp.tracking_number
-                          ? <span className="text-[11px] font-mono text-gray-500">{shp.tracking_number.slice(0, 16)}…</span>
-                          : <span className="text-gray-300 text-[12px]">—</span>}
-                      </td>
-                      <td className="px-5 py-3"><StatusBadge status={shp.status} size="sm" /></td>
-                      <td className="px-5 py-3 text-[12px] text-gray-400">
-                        {shp.estimated_delivery ? new Date(shp.estimated_delivery).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
-                      </td>
+            <>
+              {/* Mobile card list */}
+              <div className="sm:hidden divide-y divide-[rgba(0,0,0,0.05)]">
+                {filteredShipments.map((shp: any) => (
+                  <div key={shp.id} onClick={() => setSelectedId(shp.id)}
+                    className={`px-3 py-3 hover:bg-gray-50 active:bg-gray-100 cursor-pointer ${selectedId === shp.id ? 'bg-[#F0FDF4]' : ''}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-mono font-medium text-gray-900">
+                          {shp.orders ? (shp.orders.order_id ? `#${shp.orders.order_id}` : `#${shp.orders.id?.slice(0, 8).toUpperCase()}`) : '—'}
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-0.5 truncate">
+                          {shp.orders?.ship_to_name || shp.orders?.buyer_name || shp.orders?.customers?.name || '—'}
+                          {shp.carrier ? ` · ${CARRIER_LABELS[shp.carrier] || shp.carrier.toUpperCase()}` : ''}
+                        </p>
+                      </div>
+                      <StatusBadge status={shp.status} size="sm" />
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      {shp.tracking_number && <span className="text-[11px] font-mono text-gray-400">{shp.tracking_number.slice(0, 18)}…</span>}
+                      {shp.estimated_delivery && <span className="text-[11px] text-gray-400">Est. {new Date(shp.estimated_delivery).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-[rgba(0,0,0,0.06)]">
+                      {['Order', 'Ship To', 'Carrier', 'Tracking', 'Status', 'Est. Delivery'].map(h => (
+                        <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredShipments.map((shp: any, i: number) => (
+                      <tr key={shp.id} onClick={() => setSelectedId(shp.id)}
+                        className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === shp.id ? 'bg-[#F0FDF4]' : ''} ${i < filteredShipments.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
+                        <td className="px-5 py-3 text-[12px] font-mono text-gray-700">
+                          {shp.orders ? (shp.orders.order_id ? `#${shp.orders.order_id}` : `#${shp.orders.id?.slice(0, 8).toUpperCase()}`) : '—'}
+                        </td>
+                        <td className="px-5 py-3 text-[12px] text-gray-600">
+                          {shp.orders?.ship_to_name || shp.orders?.buyer_name || shp.orders?.customers?.name || '—'}
+                        </td>
+                        <td className="px-5 py-3 text-[13px] text-gray-700">{shp.carrier ? (CARRIER_LABELS[shp.carrier] || shp.carrier.toUpperCase()) : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-5 py-3">
+                          {shp.tracking_number
+                            ? <span className="text-[11px] font-mono text-gray-500">{shp.tracking_number.slice(0, 16)}…</span>
+                            : <span className="text-gray-300 text-[12px]">—</span>}
+                        </td>
+                        <td className="px-5 py-3"><StatusBadge status={shp.status} size="sm" /></td>
+                        <td className="px-5 py-3 text-[12px] text-gray-400">
+                          {shp.estimated_delivery ? new Date(shp.estimated_delivery).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
 

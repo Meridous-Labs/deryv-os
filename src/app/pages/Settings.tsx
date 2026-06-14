@@ -267,7 +267,7 @@ export function Settings() {
   const previewId = `${previewPrefix}-${year}-${String(previewSeq).padStart(6, '0')}`;
 
   return (
-    <div className="p-6 max-w-[860px] space-y-5">
+    <div className="p-3 sm:p-6 max-w-[860px] space-y-5">
       <div>
         <h2 className="text-gray-900">Settings</h2>
         <p className="text-[13px] text-gray-400 mt-0.5">Manage your organization, users, and preferences</p>
@@ -337,53 +337,36 @@ export function Settings() {
           {membersLoading ? (
             <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-10 bg-gray-50 rounded-lg animate-pulse" />)}</div>
           ) : membersError ? <ErrorState message={membersError} onRetry={reloadMembers} />
-          : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                  {['Member', 'Role', ''].map(h => (
-                    <th key={h} className="text-left py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide pr-4">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {members.length === 0 ? (
-                  <tr><td colSpan={3} className="py-8 text-center text-[13px] text-gray-400">No team members yet.</td></tr>
-                ) : members.map((m: any, i: number) => {
-                  const isCurrentUser = m.user_id === user?.id;
-                  const initials = m.user_id?.slice(0, 2).toUpperCase() ?? 'U?';
-                  return (
-                    <tr key={m.id} className={`hover:bg-gray-50/60 ${i < members.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
-                      <td className="py-3 pr-4">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-full bg-gray-900 flex items-center justify-center flex-shrink-0">
-                            <span className="text-white text-[10px] font-semibold">{initials}</span>
-                          </div>
-                          <div>
-                            <p className="text-[13px] font-medium text-gray-900">{isCurrentUser ? 'You' : `Member ${m.user_id?.slice(0, 6)}`}</p>
-                            <p className="text-[11px] text-gray-400">Added {new Date(m.created_at).toLocaleDateString()}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 pr-4">
-                        <select defaultValue={m.role} onChange={e => updateMemberRole(m.id, e.target.value)}
-                          className="text-[13px] text-gray-700 border border-[rgba(0,0,0,0.1)] rounded-lg px-2 py-1 focus:outline-none bg-white capitalize"
-                          disabled={isCurrentUser}>
-                          {ROLES.map(r => <option key={r} value={r} className="capitalize">{r}</option>)}
-                        </select>
-                      </td>
-                      <td className="py-3">
-                        {!isCurrentUser && (
-                          <button onClick={() => removeMember(m.id, m.user_id)} className="text-gray-300 hover:text-red-400 p-1 rounded transition-colors">
-                            <Trash2 size={12} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          : members.length === 0 ? (
+            <p className="py-8 text-center text-[13px] text-gray-400">No team members yet.</p>
+          ) : (
+            <div className="divide-y divide-[rgba(0,0,0,0.05)]">
+              {members.map((m: any) => {
+                const isCurrentUser = m.user_id === user?.id;
+                const initials = m.user_id?.slice(0, 2).toUpperCase() ?? 'U?';
+                return (
+                  <div key={m.id} className="flex items-center gap-3 py-3">
+                    <div className="w-7 h-7 rounded-full bg-gray-900 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white text-[10px] font-semibold">{initials}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-medium text-gray-900">{isCurrentUser ? 'You' : `Member ${m.user_id?.slice(0, 6)}`}</p>
+                      <p className="text-[11px] text-gray-400">Added {new Date(m.created_at).toLocaleDateString()}</p>
+                    </div>
+                    <select defaultValue={m.role} onChange={e => updateMemberRole(m.id, e.target.value)}
+                      className="text-[13px] text-gray-700 border border-[rgba(0,0,0,0.1)] rounded-lg px-2 py-1 focus:outline-none bg-white capitalize flex-shrink-0"
+                      disabled={isCurrentUser}>
+                      {ROLES.map(r => <option key={r} value={r} className="capitalize">{r}</option>)}
+                    </select>
+                    {!isCurrentUser && (
+                      <button onClick={() => removeMember(m.id, m.user_id)} className="text-gray-300 hover:text-red-400 p-1 rounded transition-colors flex-shrink-0">
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </Section>
       )}
@@ -453,32 +436,26 @@ export function Settings() {
             <Info size={13} className="flex-shrink-0 mt-px text-gray-400" />
             <span>Preferences are saved in this browser only. Server-side delivery configuration is not yet available.</span>
           </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                <th className="text-left py-2 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Event</th>
-                <th className="text-center py-2 px-4 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Email</th>
-                <th className="text-center py-2 px-4 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Push</th>
-              </tr>
-            </thead>
-            <tbody>
-              {NOTIF_DEFAULTS.map((n, i) => (
-                <tr key={n.id} className={i < NOTIF_DEFAULTS.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}>
-                  <td className="py-3 text-[13px] text-gray-700">{n.label}</td>
+          <div className="divide-y divide-[rgba(0,0,0,0.05)]">
+            {NOTIF_DEFAULTS.map((n) => (
+              <div key={n.id} className="flex items-center justify-between py-3 gap-3">
+                <p className="text-[13px] text-gray-700 flex-1 min-w-0">{n.label}</p>
+                <div className="flex items-center gap-4 flex-shrink-0">
                   {(['email', 'push'] as const).map(type => (
-                    <td key={type} className="py-3 px-4 text-center">
+                    <div key={type} className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">{type}</span>
                       <button
                         onClick={() => setNotifState(s => ({...s, [n.id]: {...s[n.id], [type]: !s[n.id]?.[type]}}))}
                         className={`w-9 h-5 rounded-full transition-colors relative inline-flex flex-shrink-0 ${notifState[n.id]?.[type] ? 'bg-[#3ECF8E]' : 'bg-gray-200'}`}
                       >
                         <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm ${notifState[n.id]?.[type] ? 'left-[18px]' : 'left-0.5'}`} />
                       </button>
-                    </td>
+                    </div>
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                </div>
+              </div>
+            ))}
+          </div>
           <div className="flex items-center justify-end gap-3 mt-5 pt-4 border-t border-[rgba(0,0,0,0.06)]">
             {notifSaved && <span className="text-[12px] text-[#3ECF8E]">Saved to browser</span>}
             <button onClick={saveNotifPrefs} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg transition-colors">

@@ -475,7 +475,7 @@ export function Partners() {
   }, [partners, partnersLoading, selectedPartnerId]);
 
   return (
-    <div className="p-6 max-w-[1200px] space-y-5">
+    <div className="p-3 sm:p-6 max-w-[1200px] space-y-5">
       {notFoundMsg && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-[13px]">
           {notFoundMsg}

@@ -402,7 +402,7 @@ export function AiOps() {
   const showHistory = view === 'overview' || view === 'history';
 
   return (
-    <div className="p-6 max-w-[1200px] space-y-5">
+    <div className="p-3 sm:p-6 max-w-[1200px] space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">AI Ops</h2>

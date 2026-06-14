@@ -436,7 +436,7 @@ export function Reports() {
   const activeFilterCount = Object.keys(filterValues).filter(k => filterValues[k]).length;
 
   return (
-    <div className="p-6 max-w-[1200px] space-y-5">
+    <div className="p-3 sm:p-6 max-w-[1200px] space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">Reports</h2>
@@ -549,34 +549,54 @@ export function Reports() {
           {vendorMetrics.length === 0 ? (
             <EmptyState title="No vendor data" description="Vendor performance will show once LOTs are assigned to vendors." />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                    {['Vendor', 'Total LOTs', 'Active LOTs', 'Purchase Cost', 'Total MSRP', 'Sold Revenue', 'Recovery %'].map(h => (
-                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {vendorMetrics.map((v: any, i: number) => (
-                    <tr
-                      key={v.id}
-                      onClick={() => navigate(`/partners/vendors?selected=${v.id}`)}
-                      className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${i < vendorMetrics.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
-                    >
-                      <td className="px-5 py-3 text-[13px] font-medium text-gray-900">{v.name}</td>
-                      <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">{v.totalLots}</td>
-                      <td className="px-5 py-3 text-[13px] font-semibold text-[#16a34a] tabular-nums">{v.activeLots}</td>
-                      <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">${v.purchaseCost.toLocaleString()}</td>
-                      <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">${v.totalMSRP.toLocaleString()}</td>
-                      <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">${v.soldRevenue.toFixed(2)}</td>
-                      <td className="px-5 py-3 text-[13px] font-semibold text-gray-900 tabular-nums">{v.recoveryAmount}%</td>
+            <>
+              {/* Mobile card list */}
+              <div className="sm:hidden divide-y divide-[rgba(0,0,0,0.05)]">
+                {vendorMetrics.map((v: any) => (
+                  <div key={v.id} onClick={() => navigate(`/partners/vendors?selected=${v.id}`)}
+                    className="px-3 py-3 hover:bg-gray-50 active:bg-gray-100 cursor-pointer">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[13px] font-medium text-gray-900">{v.name}</p>
+                      <span className="text-[14px] font-semibold text-gray-900 tabular-nums">{v.recoveryAmount}%</span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 flex-wrap">
+                      <span className="text-[11px] text-gray-500">{v.totalLots} LOTs · <span className="text-[#16a34a] font-medium">{v.activeLots} active</span></span>
+                      <span className="text-[11px] text-gray-400">${v.purchaseCost.toLocaleString()} cost</span>
+                      <span className="text-[11px] text-gray-400">${v.soldRevenue.toFixed(0)} sold</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-[rgba(0,0,0,0.06)]">
+                      {['Vendor', 'Total LOTs', 'Active LOTs', 'Purchase Cost', 'Total MSRP', 'Sold Revenue', 'Recovery %'].map(h => (
+                        <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {vendorMetrics.map((v: any, i: number) => (
+                      <tr
+                        key={v.id}
+                        onClick={() => navigate(`/partners/vendors?selected=${v.id}`)}
+                        className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${i < vendorMetrics.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
+                      >
+                        <td className="px-5 py-3 text-[13px] font-medium text-gray-900">{v.name}</td>
+                        <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">{v.totalLots}</td>
+                        <td className="px-5 py-3 text-[13px] font-semibold text-[#16a34a] tabular-nums">{v.activeLots}</td>
+                        <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">${v.purchaseCost.toLocaleString()}</td>
+                        <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">${v.totalMSRP.toLocaleString()}</td>
+                        <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">${v.soldRevenue.toFixed(2)}</td>
+                        <td className="px-5 py-3 text-[13px] font-semibold text-gray-900 tabular-nums">{v.recoveryAmount}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

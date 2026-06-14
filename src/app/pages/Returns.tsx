@@ -363,7 +363,7 @@ export function Returns() {
   };
 
   return (
-    <div className="p-6 max-w-[1200px] space-y-4">
+    <div className="p-3 sm:p-6 max-w-[1200px] space-y-4">
       {notFoundMsg && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-[13px]">
           {notFoundMsg}

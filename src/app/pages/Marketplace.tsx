@@ -416,7 +416,7 @@ export function Marketplace() {
   const selectedListing = listings.find(l => l.id === selectedId) ?? null;
 
   return (
-    <div className="p-6 max-w-[1300px] space-y-5">
+    <div className="p-3 sm:p-6 max-w-[1300px] space-y-5">
       {notFoundMsg && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-[13px]">
           {notFoundMsg}
@@ -455,41 +455,64 @@ export function Marketplace() {
         : filtered.length === 0 ? (
           <EmptyState title="No listings found" description={search ? 'Try a different search.' : 'Create your first listing.'} action={!search ? { label: 'New Listing', onClick: () => setShowNew(true) } : undefined} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                  {['Title', 'Channel', 'Price', 'Status', 'Sync', 'Views', 'Published'].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((listing: any, i: number) => (
-                  <tr
-                    key={listing.id}
-                    onClick={() => setSelectedId(listing.id)}
-                    className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === listing.id ? 'bg-[#F0FDF4]' : ''} ${i < filtered.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
-                  >
-                    <td className="px-5 py-3 max-w-[220px]">
+          <>
+            {/* Mobile card list */}
+            <div className="sm:hidden divide-y divide-[rgba(0,0,0,0.05)]">
+              {filtered.map((listing: any) => (
+                <div key={listing.id} onClick={() => setSelectedId(listing.id)}
+                  className={`px-3 py-3 hover:bg-gray-50 active:bg-gray-100 cursor-pointer ${selectedId === listing.id ? 'bg-[#F0FDF4]' : ''}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
                       <p className="text-[13px] font-medium text-gray-900 truncate">{listing.title}</p>
-                      <p className="text-[11px] text-gray-400">{listing.inventory_items?.sku ?? ''}</p>
-                    </td>
-                    <td className="px-5 py-3">
-                      <span className="text-[11px] font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">
-                        {MARKETPLACE_LABEL[listing.channel] ?? listing.channel}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3 text-[13px] font-semibold text-gray-900 tabular-nums">${Number(listing.price).toFixed(2)}</td>
-                    <td className="px-5 py-3"><StatusBadge status={listing.status} size="sm" /></td>
-                    <td className="px-5 py-3"><StatusBadge status={listing.sync_status ?? 'PENDING'} size="sm" /></td>
-                    <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">{listing.views ?? 0}</td>
-                    <td className="px-5 py-3 text-[12px] text-gray-400">{listing.published_at ? new Date(listing.published_at).toLocaleDateString() : '—'}</td>
+                      <p className="text-[11px] text-gray-400 mt-0.5">{listing.inventory_items?.sku ?? ''} · {MARKETPLACE_LABEL[listing.channel] ?? listing.channel}</p>
+                    </div>
+                    <p className="text-[14px] font-semibold text-gray-900 flex-shrink-0">${Number(listing.price).toFixed(2)}</p>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <StatusBadge status={listing.status} size="sm" />
+                    <StatusBadge status={listing.sync_status ?? 'PENDING'} size="sm" />
+                    <span className="text-[11px] text-gray-400">{listing.views ?? 0} views</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[rgba(0,0,0,0.06)]">
+                    {['Title', 'Channel', 'Price', 'Status', 'Sync', 'Views', 'Published'].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map((listing: any, i: number) => (
+                    <tr
+                      key={listing.id}
+                      onClick={() => setSelectedId(listing.id)}
+                      className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === listing.id ? 'bg-[#F0FDF4]' : ''} ${i < filtered.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
+                    >
+                      <td className="px-5 py-3 max-w-[220px]">
+                        <p className="text-[13px] font-medium text-gray-900 truncate">{listing.title}</p>
+                        <p className="text-[11px] text-gray-400">{listing.inventory_items?.sku ?? ''}</p>
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="text-[11px] font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">
+                          {MARKETPLACE_LABEL[listing.channel] ?? listing.channel}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-[13px] font-semibold text-gray-900 tabular-nums">${Number(listing.price).toFixed(2)}</td>
+                      <td className="px-5 py-3"><StatusBadge status={listing.status} size="sm" /></td>
+                      <td className="px-5 py-3"><StatusBadge status={listing.sync_status ?? 'PENDING'} size="sm" /></td>
+                      <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">{listing.views ?? 0}</td>
+                      <td className="px-5 py-3 text-[12px] text-gray-400">{listing.published_at ? new Date(listing.published_at).toLocaleDateString() : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

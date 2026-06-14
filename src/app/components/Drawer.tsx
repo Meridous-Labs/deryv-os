@@ -23,8 +23,9 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: Dra
   return (
     <div className="fixed inset-0 z-40 flex">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="ml-auto relative flex flex-col h-full bg-white shadow-2xl border-l border-[rgba(0,0,0,0.08)]" style={{ width: 520 }}>
-        <div className="px-5 py-4 border-b border-[rgba(0,0,0,0.07)] flex items-start justify-between flex-shrink-0">
+      {/* On mobile: full width. On sm+: fixed 520px sliding from right */}
+      <div className="ml-auto relative flex flex-col h-full bg-white shadow-2xl border-l border-[rgba(0,0,0,0.08)] w-full sm:w-[520px]">
+        <div className="px-4 sm:px-5 py-4 border-b border-[rgba(0,0,0,0.07)] flex items-start justify-between flex-shrink-0">
           <div className="min-w-0 pr-2">
             <h2 className="text-[15px] font-semibold text-gray-900 truncate">{title}</h2>
             {subtitle && <p className="text-[12px] text-gray-400 mt-0.5 truncate">{subtitle}</p>}
@@ -34,9 +35,9 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: Dra
             className="w-7 h-7 rounded-md hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-700 text-[18px] leading-none flex-shrink-0"
           >×</button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4">{children}</div>
         {footer && (
-          <div className="px-5 py-3.5 border-t border-[rgba(0,0,0,0.07)] flex-shrink-0">
+          <div className="px-4 sm:px-5 py-3.5 border-t border-[rgba(0,0,0,0.07)] flex-shrink-0">
             {footer}
           </div>
         )}
