@@ -67,15 +67,11 @@ function NewListingModal({ open, onClose, orgId, userId, items, onCreated }: any
           {saving && <Loader2 size={12} className="animate-spin" />}Create Listing
         </button>
       </>}>
-      <div className="space-y-4">
+      <div className="space-y-3">
         {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
         <FormField label="Inventory Item" required>
-          <select className={selectCls} value={form.inventory_item_id} onChange={e => {
-            const item = items.find((i: any) => i.id === e.target.value);
-            set('inventory_item_id', e.target.value);
-            if (item && !form.title) set('title', item.product_title);
-            if (item && !form.price && item.current_asking_price) set('price', String(item.current_asking_price));
-          }}>
+          <select className={selectCls} value={form.inventory_item_id}
+            onChange={e => set('inventory_item_id', e.target.value)}>
             <option value="">— Select item —</option>
             {items.map((i: any) => <option key={i.id} value={i.id}>{i.product_title}</option>)}
           </select>
@@ -325,11 +321,35 @@ const VIEW_FILTER: Record<string, (q: any) => any> = {
   shopify: (q: any) => q.eq('channel', 'SHOPIFY'),
 };
 
+
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
+}
 export function Marketplace() {
   const view = useSecondaryView();
   const { orgId, user, currentRole: role } = useAuth();
   const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
+  const _sortInit = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.marketplace') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_sortInit.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_sortInit.dir ?? 'asc');
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    const nextCol = sortCol === col ? col : col;
+    setSortCol(nextCol);
+    setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.marketplace', JSON.stringify({ col: nextCol, dir: next }));
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterValues, setFilterValues] = useState<FilterValues>({});
   const [notFoundMsg, setNotFoundMsg] = useState<string | null>(null);
@@ -415,6 +435,19 @@ export function Marketplace() {
 
   const selectedListing = listings.find(l => l.id === selectedId) ?? null;
 
+
+
+  const sorted = sortItems(filtered, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'title') return item.title;
+    if (col === 'channel') return item.channel;
+    if (col === 'price') return Number(item.price ?? 0);
+    if (col === 'status') return item.status;
+    if (col === 'sync') return item.sync_status;
+    if (col === 'views') return Number(item.views ?? 0);
+    if (col === 'published') return item.published_at;
+    return null;
+  });
+
   return (
     <div className="p-3 sm:p-6 max-w-[1300px] space-y-5">
       {notFoundMsg && (
@@ -481,17 +514,31 @@ export function Marketplace() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                    {['Title', 'Channel', 'Price', 'Status', 'Sync', 'Views', 'Published'].map(h => (
-                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    {([
+                        { label: 'Title', col: 'title' },
+                        { label: 'Channel', col: 'channel' },
+                        { label: 'Price', col: 'price' },
+                        { label: 'Status', col: 'status' },
+                        { label: 'Sync', col: 'sync' },
+                        { label: 'Views', col: 'views' },
+                        { label: 'Published', col: 'published' },
+                    ] as const).map(({ label, col }) => (
+                      <th key={col} onClick={() => handleSort(col)}
+                        className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-gray-600 transition-colors">
+                        <span className="inline-flex items-center gap-1">
+                          {label}
+                          {sortCol === col ? <span className="text-[#3ECF8E]">{sortDir === 'asc' ? '↑' : '↓'}</span> : <span className="opacity-0">↕</span>}
+                        </span>
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((listing: any, i: number) => (
+                  {sorted.map((listing: any, i: number) => (
                     <tr
                       key={listing.id}
                       onClick={() => setSelectedId(listing.id)}
-                      className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === listing.id ? 'bg-[#F0FDF4]' : ''} ${i < filtered.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
+                      className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === listing.id ? 'bg-[#F0FDF4]' : ''} ${i < sorted.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
                     >
                       <td className="px-5 py-3 max-w-[220px]">
                         <p className="text-[13px] font-medium text-gray-900 truncate">{listing.title}</p>
@@ -515,6 +562,7 @@ export function Marketplace() {
           </>
         )}
       </div>
+
 
       <NewListingModal open={showNew} onClose={() => setShowNew(false)} orgId={orgId} userId={user?.id} items={items} onCreated={reload} />
       {selectedListing && (

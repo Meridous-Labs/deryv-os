@@ -46,145 +46,36 @@ function NewReportModal({ open, onClose, orgId, userId, currentFilters, onCreate
     setForm({ name: '', report_type: 'Recovery', schedule: 'Manual' });
   };
 
-  return (
-    <Modal open={open} onClose={onClose} title="New Report"
-      footer={<>
-        <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
-        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
-          {saving && <Loader2 size={12} className="animate-spin" />}Create Report
-        </button>
-      </>}>
-      <div className="space-y-4">
-        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
-        <FormField label="Report Name" required><input className={inputCls} value={form.name} onChange={e => set('name', e.target.value)} placeholder="Monthly Recovery Report" /></FormField>
-        <div className="grid grid-cols-2 gap-4">
-          <FormField label="Type"><select className={selectCls} value={form.report_type} onChange={e => set('report_type', e.target.value)}>{REPORT_TYPES.map(t => <option key={t}>{t}</option>)}</select></FormField>
-          <FormField label="Schedule"><select className={selectCls} value={form.schedule} onChange={e => set('schedule', e.target.value)}>{SCHEDULES.map(s => <option key={s}>{s}</option>)}</select></FormField>
-        </div>
-        {Object.keys(currentFilters || {}).length > 0 && (
-          <div className="text-[11px] text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
-            Current filters will be saved with this report
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
 }
 
-function ReportDrawer({ report, onClose, orgId, userId, onUpdated, onDeleted }: any) {
-  const [running, setRunning] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleRun = async () => {
-    setRunning(true); setError(null);
-    const { error: err } = await updateRow('reports', report.id, {
-      last_run_at: new Date().toISOString(),
-    });
-    if (err) {
-      setError(err);
-      setRunning(false);
-      return;
-    }
-    await logActivity(orgId, userId, `Report "${report.name}" run`, 'reports', report.id);
-    setRunning(false);
-    onUpdated();
-  };
-
-  const handleDelete = async () => {
-    setDeleting(true);
-    await deleteRow('reports', report.id);
-    await logActivity(orgId, userId, `Report "${report.name}" deleted`, 'reports', report.id);
-    setDeleting(false);
-    setConfirmDelete(false);
-    onDeleted();
-    onClose();
-  };
-
-  const handleDownloadPDF = () => {
-    if (report.pdf_url) {
-      window.open(report.pdf_url, '_blank');
-    }
-  };
-
-  const handleExportCSV = () => {
-    // Generate CSV based on report type and filters
-    const csvContent = `Report: ${report.name}\nType: ${report.report_type}\nGenerated: ${new Date().toLocaleString()}\n\n`;
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${report.name.replace(/\s+/g, '_')}_${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <>
-      <Drawer
-        open
-        onClose={onClose}
-        title={report.name}
-        subtitle={`${report.report_type} Report`}
-        footer={
-          <div className="flex items-center gap-2">
-            <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 px-3 py-2 text-[13px] text-red-500 border border-red-200 rounded-lg hover:bg-red-50">
-              <Trash2 size={13} />Delete
-            </button>
-            <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-3 py-2 border border-[rgba(0,0,0,0.1)] text-[13px] text-gray-600 rounded-lg hover:bg-gray-50">
-              <Download size={13} />Export CSV
-            </button>
-            {report.pdf_url && (
-              <button onClick={handleDownloadPDF} className="flex items-center gap-1.5 px-3 py-2 border border-[rgba(0,0,0,0.1)] text-[13px] text-gray-600 rounded-lg hover:bg-gray-50">
-                <FileText size={13} />Download PDF
-              </button>
-            )}
-            <button onClick={handleRun} disabled={running} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
-              {running ? <Loader2 size={13} className="animate-spin" /> : <PlayCircle size={13} />}Run Report
-            </button>
-          </div>
-        }
-      >
-        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg mb-4">{error}</p>}
-        <div>
-          <DetailRow label="Report Name" value={report.name} />
-          <DetailRow label="Type" value={report.report_type} />
-          <DetailRow label="Schedule" value={report.schedule} />
-          <DetailRow label="Last Run" value={report.last_run_at ? new Date(report.last_run_at).toLocaleString() : 'Never'} />
-          <DetailRow label="Created" value={new Date(report.created_at).toLocaleDateString()} />
-          {report.filters && Object.keys(report.filters).length > 0 && (
-            <DetailRow label="Filters" value={
-              <div className="text-[11px] text-gray-600 space-y-1">
-                {Object.entries(report.filters).map(([key, value]) => (
-                  <div key={key}>{key}: {String(value)}</div>
-                ))}
-              </div>
-            } />
-          )}
-          {report.pdf_url && <DetailRow label="PDF URL" value={<a href={report.pdf_url} target="_blank" rel="noopener noreferrer" className="text-[#3ECF8E] hover:underline text-[11px]">{report.pdf_url}</a>} />}
-        </div>
-      </Drawer>
-
-      <ConfirmDialog
-        open={confirmDelete}
-        title="Delete Report"
-        description={`Delete report "${report.name}"? This action cannot be undone.`}
-        confirmLabel="Delete"
-        danger
-        onConfirm={handleDelete}
-        onCancel={() => setConfirmDelete(false)}
-        loading={deleting}
-      />
-    </>
-  );
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
 }
-
 export function Reports() {
   const view = useSecondaryView();
   const navigate = useNavigate();
   const { orgId, user } = useAuth();
   const [showNew, setShowNew] = useState(false);
+  const _sortInit = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.reports') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_sortInit.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_sortInit.dir ?? 'asc');
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    const nextCol = sortCol === col ? col : col;
+    setSortCol(nextCol);
+    setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.reports', JSON.stringify({ col: nextCol, dir: next }));
+  };
   const [filterValues, setFilterValues] = useState<FilterValues>({});
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
 
@@ -435,6 +326,19 @@ export function Reports() {
 
   const activeFilterCount = Object.keys(filterValues).filter(k => filterValues[k]).length;
 
+
+
+  const sorted = sortItems(vendorMetrics, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'name') return item.name;
+    if (col === 'totalLots') return Number(item.totalLots ?? 0);
+    if (col === 'activeLots') return Number(item.activeLots ?? 0);
+    if (col === 'cost') return Number(item.purchaseCost ?? 0);
+    if (col === 'msrp') return Number(item.totalMSRP ?? 0);
+    if (col === 'revenue') return Number(item.soldRevenue ?? 0);
+    if (col === 'recovery') return Number(item.recoveryAmount ?? 0);
+    return null;
+  });
+
   return (
     <div className="p-3 sm:p-6 max-w-[1200px] space-y-5">
       <div className="flex items-center justify-between">
@@ -572,17 +476,31 @@ export function Reports() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                      {['Vendor', 'Total LOTs', 'Active LOTs', 'Purchase Cost', 'Total MSRP', 'Sold Revenue', 'Recovery %'].map(h => (
-                        <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      {([
+                        { label: 'Vendor', col: 'name' },
+                        { label: 'Total LOTs', col: 'totalLots' },
+                        { label: 'Active LOTs', col: 'activeLots' },
+                        { label: 'Purchase Cost', col: 'cost' },
+                        { label: 'Total MSRP', col: 'msrp' },
+                        { label: 'Sold Revenue', col: 'revenue' },
+                        { label: 'Recovery %', col: 'recovery' },
+                      ] as const).map(({ label, col }) => (
+                        <th key={col} onClick={() => handleSort(col)}
+                          className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-gray-600 transition-colors">
+                          <span className="inline-flex items-center gap-1">
+                            {label}
+                            {sortCol === col ? <span className="text-[#3ECF8E]">{sortDir === 'asc' ? '↑' : '↓'}</span> : <span className="opacity-0">↕</span>}
+                          </span>
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {vendorMetrics.map((v: any, i: number) => (
+                    {sorted.map((v: any, i: number) => (
                       <tr
                         key={v.id}
                         onClick={() => navigate(`/partners/vendors?selected=${v.id}`)}
-                        className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${i < vendorMetrics.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
+                        className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${i < sorted.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
                       >
                         <td className="px-5 py-3 text-[13px] font-medium text-gray-900">{v.name}</td>
                         <td className="px-5 py-3 text-[13px] text-gray-600 tabular-nums">{v.totalLots}</td>
@@ -600,6 +518,7 @@ export function Reports() {
           )}
         </div>
       )}
+
 
       {view === 'marketplace' && (
         <div className="space-y-5">

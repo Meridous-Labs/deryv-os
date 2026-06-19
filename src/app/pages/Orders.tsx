@@ -150,148 +150,6 @@ function CreateOrderModal({ open, onClose, orgId, userId, inventoryItems, onCrea
     setSelectedItems([]);
   };
 
-  return (
-    <Modal open={open} onClose={onClose} title="Create Order" width="max-w-2xl"
-      footer={<>
-        <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
-        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
-          {saving && <Loader2 size={12} className="animate-spin" />}Create Order
-        </button>
-      </>}>
-      <div className="space-y-4">
-        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
-
-        <FormField label="Channel">
-          <select className={selectCls} value={form.channel} onChange={e => set('channel', e.target.value)}>
-            {CHANNEL_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </select>
-        </FormField>
-
-        {/* Buyer info */}
-        <div className="grid grid-cols-2 gap-4">
-          <FormField label="Buyer Name"><input className={inputCls} value={form.buyer_name} onChange={e => set('buyer_name', e.target.value)} placeholder="Jane Smith" /></FormField>
-          <FormField label="Buyer Email"><input type="email" className={inputCls} value={form.buyer_email} onChange={e => set('buyer_email', e.target.value)} placeholder="jane@email.com" /></FormField>
-        </div>
-
-        {/* Shipping address — always shown for direct/manual channels */}
-        {needsAddress && (
-          <div className="space-y-3 bg-gray-50 rounded-xl p-4 border border-[rgba(0,0,0,0.06)]">
-            <div className="flex items-center gap-1.5 mb-1">
-              <MapPin size={12} className="text-gray-400" />
-              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Ship-To Address</label>
-            </div>
-            <FormField label="Ship-To Name">
-              <input className={inputCls} value={form.ship_to_name} onChange={e => set('ship_to_name', e.target.value)} placeholder="Recipient name" />
-            </FormField>
-            <FormField label="Street Address">
-              <input className={inputCls} value={form.ship_to_street1} onChange={e => set('ship_to_street1', e.target.value)} placeholder="123 Main St" />
-            </FormField>
-            <FormField label="Apt / Suite / Unit">
-              <input className={inputCls} value={form.ship_to_street2} onChange={e => set('ship_to_street2', e.target.value)} placeholder="Apt 4B (optional)" />
-            </FormField>
-            <div className="grid grid-cols-3 gap-3">
-              <FormField label="City"><input className={inputCls} value={form.ship_to_city} onChange={e => set('ship_to_city', e.target.value)} placeholder="New York" /></FormField>
-              <FormField label="State"><input className={inputCls} value={form.ship_to_state} onChange={e => set('ship_to_state', e.target.value)} placeholder="NY" maxLength={2} /></FormField>
-              <FormField label="ZIP"><input className={inputCls} value={form.ship_to_zip} onChange={e => set('ship_to_zip', e.target.value)} placeholder="10001" /></FormField>
-            </div>
-            <FormField label="Country">
-              <select className={selectCls} value={form.ship_to_country} onChange={e => set('ship_to_country', e.target.value)}>
-                <option value="US">United States</option>
-                <option value="CA">Canada</option>
-                <option value="GB">United Kingdom</option>
-                <option value="AU">Australia</option>
-                <option value="MX">Mexico</option>
-              </select>
-            </FormField>
-          </div>
-        )}
-
-        {/* Order items */}
-        <FormField label="Order Items">
-          <div className="space-y-2">
-            <div className="relative">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input className="pl-7 pr-3 py-1.5 text-[13px] bg-gray-50 border border-[rgba(0,0,0,0.08)] rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E]"
-                placeholder="Search inventory items..." value={itemSearch} onChange={e => setItemSearch(e.target.value)} />
-              {itemSearch && (
-                <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto bg-white border border-[rgba(0,0,0,0.1)] rounded-lg shadow-lg">
-                  {filteredItems.slice(0, 10).map((item: any) => (
-                    <div key={item.id} onClick={() => addItem(item.id)} className="px-3 py-2 hover:bg-gray-50 cursor-pointer text-[13px] border-b border-[rgba(0,0,0,0.04)] last:border-0">
-                      <div className="font-medium text-gray-900">{item.inventory_id}</div>
-                      <div className="text-gray-600 text-[12px] truncate">{item.product_title}</div>
-                      <div className="flex items-center gap-3 mt-0.5">
-                        <span className="text-gray-400 text-[11px]">${(item.current_asking_price || 0).toFixed(2)}</span>
-                        {item.weight_oz && <span className="text-gray-400 text-[11px]">{item.weight_oz} oz</span>}
-                        {item.length_in && <span className="text-gray-400 text-[11px]">{item.length_in}×{item.width_in}×{item.height_in} in</span>}
-                      </div>
-                    </div>
-                  ))}
-                  {filteredItems.length === 0 && <div className="px-3 py-2 text-[13px] text-gray-400">No items found</div>}
-                </div>
-              )}
-            </div>
-            {selectedItems.map(item => {
-              const invItem = inventoryItems.find((i: any) => i.id === item.inventory_item_id);
-              return (
-                <div key={item.inventory_item_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12px] font-medium text-gray-900 truncate">{invItem?.inventory_id}</div>
-                    <div className="text-[11px] text-gray-600 truncate">{invItem?.product_title}</div>
-                    {(invItem?.weight_oz || invItem?.length_in) && (
-                      <div className="text-[10px] text-gray-400 mt-0.5">
-                        {invItem.weight_oz && `${invItem.weight_oz} oz`}
-                        {invItem.length_in && ` · ${invItem.length_in}×${invItem.width_in}×${invItem.height_in} in`}
-                      </div>
-                    )}
-                  </div>
-                  <input type="number" className={`${inputCls} w-16 text-[12px]`} min="1" value={item.quantity}
-                    onChange={e => updateItemQuantity(item.inventory_item_id, parseInt(e.target.value) || 1)} />
-                  <input type="number" className={`${inputCls} w-20 text-[12px]`} min="0" step="0.01" value={item.unit_price}
-                    onChange={e => updateItemPrice(item.inventory_item_id, parseFloat(e.target.value) || 0)} />
-                  <button onClick={() => removeItem(item.inventory_item_id)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
-                </div>
-              );
-            })}
-          </div>
-        </FormField>
-
-        <FormField label="Total Amount ($)">
-          <input type="number" className={inputCls} value={form.total_amount} onChange={e => set('total_amount', e.target.value)} placeholder={calculatedTotal.toFixed(2)} min="0" step="0.01" />
-        </FormField>
-        <FormField label="Status">
-          <select className={selectCls} value={form.status} onChange={e => set('status', e.target.value)}>{ORDER_STATUSES.map(s => <option key={s}>{s}</option>)}</select>
-        </FormField>
-        <FormField label="Notes">
-          <textarea className={textareaCls} rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Optional notes..." />
-        </FormField>
-      </div>
-    </Modal>
-  );
-}
-
-function OrderDrawer({ order, onClose, orgId, userId, role, onUpdated }: any) {
-  const navigate = useNavigate();
-  const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({
-    channel: order.channel,
-    status: order.status,
-    total_amount: String(order.total_amount ?? ''),
-    buyer_name: order.buyer_name ?? '',
-    buyer_email: order.buyer_email ?? '',
-    ship_to_name: order.ship_to_name ?? '',
-    ship_to_street1: order.ship_to_street1 ?? '',
-    ship_to_street2: order.ship_to_street2 ?? '',
-    ship_to_city: order.ship_to_city ?? '',
-    ship_to_state: order.ship_to_state ?? '',
-    ship_to_zip: order.ship_to_zip ?? '',
-    ship_to_country: order.ship_to_country ?? 'US',
-    notes: order.notes ?? '',
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<null | 'cancel' | 'delete'>(null);
-  const [confirmLoading, setConfirmLoading] = useState(false);
-  const set = (k: string, v: string) => setEditForm(f => ({ ...f, [k]: v }));
 
   const orderNum = order.order_id ? `#${order.order_id}` : `#${order.id.slice(0, 8).toUpperCase()}`;
   const orderItems = order.order_items ?? [];
@@ -496,11 +354,35 @@ function OrderDrawer({ order, onClose, orgId, userId, role, onUpdated }: any) {
   );
 }
 
+
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
+}
 export function Orders() {
   const view = useSecondaryView();
   const { orgId, user, currentRole: role } = useAuth();
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const _sortInit = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.orders') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_sortInit.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_sortInit.dir ?? 'asc');
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    const nextCol = sortCol === col ? col : col;
+    setSortCol(nextCol);
+    setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.orders', JSON.stringify({ col: nextCol, dir: next }));
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [filterValues, setFilterValues] = useState<FilterValues>({});
@@ -572,6 +454,18 @@ export function Orders() {
 
   const selectedOrder = orders.find((o: any) => o.id === selectedId) ?? null;
 
+
+
+  const sorted = sortItems(filtered, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'order_id') return item.order_id ?? item.id;
+    if (col === 'buyer') return item.buyer_name ?? item.customers?.name;
+    if (col === 'channel') return item.channel;
+    if (col === 'status') return item.status;
+    if (col === 'total') return Number(item.total_amount ?? 0);
+    if (col === 'date') return item.created_at;
+    return null;
+  });
+
   return (
     <div className="p-3 sm:p-6 max-w-[1300px] space-y-4">
       {notFoundMsg && <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-[13px]">{notFoundMsg}</div>}
@@ -626,15 +520,28 @@ export function Orders() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                    {['Order #', 'Buyer', 'Channel', 'Status', 'Total', 'Date'].map(h => (
-                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    {([
+                        { label: 'Order #', col: 'order_id' },
+                        { label: 'Buyer', col: 'buyer' },
+                        { label: 'Channel', col: 'channel' },
+                        { label: 'Status', col: 'status' },
+                        { label: 'Total', col: 'total' },
+                        { label: 'Date', col: 'date' },
+                    ] as const).map(({ label, col }) => (
+                      <th key={col} onClick={() => handleSort(col)}
+                        className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-gray-600 transition-colors">
+                        <span className="inline-flex items-center gap-1">
+                          {label}
+                          {sortCol === col ? <span className="text-[#3ECF8E]">{sortDir === 'asc' ? '↑' : '↓'}</span> : <span className="opacity-0">↕</span>}
+                        </span>
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((order: any, i: number) => (
+                  {sorted.map((order: any, i: number) => (
                     <tr key={order.id} onClick={() => setSelectedId(order.id)}
-                      className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === order.id ? 'bg-[#F0FDF4]' : ''} ${i < filtered.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
+                      className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === order.id ? 'bg-[#F0FDF4]' : ''} ${i < sorted.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
                       <td className="px-5 py-3 text-[13px] font-mono font-medium text-gray-900">{order.order_id ? `#${order.order_id}` : `#${order.id.slice(0, 8).toUpperCase()}`}</td>
                       <td className="px-5 py-3 text-[13px] text-gray-700">{order.buyer_name || order.customers?.name || '—'}</td>
                       <td className="px-5 py-3"><span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{CHANNEL_LABEL[order.channel] ?? order.channel}</span></td>
@@ -649,6 +556,7 @@ export function Orders() {
           </>
         )}
       </div>
+
 
       <CreateOrderModal open={showCreate} onClose={() => setShowCreate(false)} orgId={orgId} userId={user?.id} inventoryItems={inventoryItems} onCreated={reload} />
       {selectedOrder && (

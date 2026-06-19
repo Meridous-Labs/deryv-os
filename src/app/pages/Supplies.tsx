@@ -199,6 +199,20 @@ function OverviewView({ orgId, role }: { orgId: string | null; role: string | nu
 
 // ─── Supply Inventory (also used for Low Stock + Reorder) ─────────────────────
 
+
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
+}
 function SupplyInventoryView({
   orgId, userId, role, filter,
 }: {
@@ -430,6 +444,17 @@ function SupplyInventoryView({
   const titleLabel = filter === 'low-stock' ? 'Low Stock' : filter === 'reorder' ? 'Reorder Queue' : 'Supply Inventory';
   const emptyDesc = filter ? 'No supplies currently require attention.' : 'Add your first supply item to get started.';
 
+  const sorted = sortItems(filteredSupplies, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'name') return item.name;
+    if (col === 'category') return item.category?.name;
+    if (col === 'sku') return item.sku;
+    if (col === 'uom') return item.unit_of_measure;
+    if (col === 'cost') return Number(item.unit_cost ?? 0);
+    if (col === 'qty') return Number(item.quantity_on_hand ?? 0);
+    if (col === 'status') return item.status;
+    return null;
+  });
+
   return (
     <>
       <div className="flex items-center justify-between mb-5">
@@ -452,11 +477,23 @@ function SupplyInventoryView({
         <Table>
           <thead>
             <tr>
-              <Th>Name</Th>
-              <Th>Category</Th>
-              <Th>SKU</Th>
-              <Th>UOM</Th>
-              {canF && <Th right>Unit Cost</Th>}
+              {([
+                  { label: 'Name', col: 'name' },
+                  { label: 'Category', col: 'category' },
+                  { label: 'SKU', col: 'sku' },
+                  { label: 'UOM', col: 'uom' },
+                  { label: 'Unit Cost', col: 'cost' },
+                  { label: 'On Hand', col: 'qty' },
+                  { label: 'Status', col: 'status' },
+              ] as const).map(({ label, col }) => (
+                <th key={col} onClick={() => col && handleSort(col)}
+                  className={`text-left px-4 py-2.5 text-[10px] font-medium text-gray-400 uppercase tracking-wide bg-gray-50 border-b border-[rgba(0,0,0,0.06)] whitespace-nowrap ${col ? 'cursor-pointer select-none hover:text-gray-600 transition-colors' : ''}`}>
+                  <span className="inline-flex items-center gap-1">
+                    {label}
+                    {col && sortCol === col ? <span className="text-[#3ECF8E]">{sortDir === 'asc' ? '↑' : '↓'}</span> : col ? <span className="opacity-0">↕</span> : null}
+                  </span>
+                </th>
+              ))}
               <Th right>On Hand</Th>
               <Th right>Reorder Pt</Th>
               <Th>Location</Th>
@@ -464,7 +501,7 @@ function SupplyInventoryView({
             </tr>
           </thead>
           <tbody>
-            {filteredSupplies.map((s: any) => (
+            {sorted.map((s: any) => (
               <tr key={s.id} onClick={() => { setSelected(s); setEditMode(false); }}
                 className="border-b border-[rgba(0,0,0,0.04)] last:border-0 hover:bg-gray-50/50 cursor-pointer">
                 <Td><span className="font-medium text-gray-900">{s.name}</span>{s.vendor?.name && <span className="text-[11px] text-gray-400 block">{s.vendor.name}</span>}</Td>
@@ -1324,6 +1361,14 @@ function InvoiceImportsView({ orgId, userId, role }: { orgId: string | null; use
 function CategoriesView({ orgId, userId, role }: { orgId: string | null; userId: string | undefined; role: string | null | undefined }) {
   const canE = canEdit(role as any);
   const [showAdd, setShowAdd] = useState(false);
+  const _si = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.supplies') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_si.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_si.dir ?? 'asc');
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    setSortCol(col); setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.supplies', JSON.stringify({ col, dir: next }));
+  };
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...EMPTY_CATEGORY });
   const [saving, setSaving] = useState(false);

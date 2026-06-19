@@ -287,6 +287,40 @@ const BRAND_DIRECT = new Set(['brand', 'manufacturer', 'make']);
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+// ── Preset matching ───────────────────────────────────────────────────────────
+interface ProductPreset {
+  id: string;
+  brand: string;
+  model: string;
+  weight_oz: number | null;
+  length_in: number | null;
+  width_in: number | null;
+  height_in: number | null;
+  notes: string | null;
+  preset_supplies?: { supply_id: string; quantity: number; supplies?: { name: string; unit_cost: number | null } }[];
+}
+
+function matchPreset(title: string, brand: string, model: string, presets: ProductPreset[]): ProductPreset | null {
+  if (!presets?.length) return null;
+  const t = title.toLowerCase();
+  const b = (brand || '').toLowerCase();
+  const m = (model || '').toLowerCase();
+  if (b && m) {
+    const exact = presets.find(p => p.brand.toLowerCase() === b && p.model.toLowerCase() === m);
+    if (exact) return exact;
+  }
+  for (const p of presets) {
+    const pb = p.brand.toLowerCase();
+    const pm = p.model.toLowerCase();
+    if (pb && pm && t.includes(pb) && t.includes(pm)) return p;
+  }
+  for (const p of presets) {
+    const words = p.model.toLowerCase().split(' ').filter((w: string) => w.length > 2);
+    if (words.length >= 2 && words.every((w: string) => t.includes(w))) return p;
+  }
+  return null;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -294,10 +328,11 @@ interface Props {
   userId: string | undefined;
   vendors: any[];
   partners: any[];
+  presets?: ProductPreset[];
   onCreated: () => void;
 }
 
-export function ManifestImportModal({ open, onClose, orgId, userId, vendors, partners, onCreated }: Props) {
+export function ManifestImportModal({ open, onClose, orgId, userId, vendors, partners, presets = [], onCreated }: Props) {
   const [step, setStep] = useState(1);
   const [lotForm, setLotForm] = useState<LotForm>(EMPTY_LOT);
   const [manifestFile, setManifestFile] = useState<File | null>(null);
@@ -390,7 +425,22 @@ export function ManifestImportModal({ open, onClose, orgId, userId, vendors, par
 
     try {
       const result = await parseSpreadsheet(manifestFile);
-      setRows(result.rows);
+      // Enrich rows with preset data where matched
+      const enriched = result.rows.map(r => {
+        const preset = matchPreset(r.product_title, r.brand, r.model, presets);
+        if (!preset) return r;
+        return {
+          ...r,
+          brand: r.brand || preset.brand,
+          model: r.model || preset.model,
+          _preset_id: preset.id,
+          _weight_oz: preset.weight_oz,
+          _length_in: preset.length_in,
+          _width_in: preset.width_in,
+          _height_in: preset.height_in,
+        } as any;
+      });
+      setRows(enriched);
       setFieldMappings(result.fieldMappings);
       setRawHeaders(result.rawHeaders);
       setRawData(result.rawData);
@@ -444,12 +494,27 @@ export function ManifestImportModal({ open, onClose, orgId, userId, vendors, par
       if (lotErr || !lot?.id) throw new Error(lotErr ?? 'LOT creation failed.');
       const lotId: string = lot.id;
 
+      // Load preset supplies for any matched presets
+      const matchedPresetIds = [...new Set(rows.map(r => (r as any)._preset_id).filter(Boolean))];
+      let presetSuppliesMap: Record<string, { supply_id: string; quantity: number; supplies?: any }[]> = {};
+      if (matchedPresetIds.length > 0) {
+        const { data: ps } = await supabase
+          .from('preset_supplies')
+          .select('preset_id, supply_id, quantity, supplies(id, name, unit_cost)')
+          .in('preset_id', matchedPresetIds);
+        for (const row of (ps ?? [])) {
+          if (!presetSuppliesMap[row.preset_id]) presetSuppliesMap[row.preset_id] = [];
+          presetSuppliesMap[row.preset_id].push(row);
+        }
+      }
+
       const items = rows.map(r => {
         const msrp = parseFloat(r.msrp) || null;
         const weight = totalMsrp > 0 && msrp
           ? msrp / totalMsrp
           : rows.length > 0 ? 1 / rows.length : 0;
         const wac = landedCost > 0 ? parseFloat((landedCost * weight).toFixed(2)) : null;
+        const rx = r as any;
         return {
           organization_id:           orgId!,
           lot_id:                    lotId,
@@ -457,7 +522,7 @@ export function ManifestImportModal({ open, onClose, orgId, userId, vendors, par
           brand:                     r.brand          || null,
           model:                     r.model          || null,
           category:                  r.category       || null,
-          condition:                 null,  // set during inspection/testing
+          condition:                 null,
           grade:                     null,
           sku:                       r.sku            || null,
           upc:                       r.upc            || null,
@@ -468,12 +533,48 @@ export function ManifestImportModal({ open, onClose, orgId, userId, vendors, par
           weighted_acquisition_cost: wac,
           status:                    'UNPROCESSED',
           warehouse_location_id:     intakeLocId,
+          weight_oz:                 rx._weight_oz    ?? null,
+          length_in:                 rx._length_in    ?? null,
+          width_in:                  rx._width_in     ?? null,
+          height_in:                 rx._height_in    ?? null,
+          _preset_id:                rx._preset_id    ?? null,
         };
       });
 
+      // Insert inventory items in batches, capture IDs for supply transactions
+      const insertedItems: { id: string; _preset_id: string | null }[] = [];
       for (let i = 0; i < items.length; i += 50) {
-        const { error: iErr } = await supabase.from('inventory_items').insert(items.slice(i, i + 50));
+        const batch = items.slice(i, i + 50);
+        const { data: inserted, error: iErr } = await supabase
+          .from('inventory_items')
+          .insert(batch.map(({ _preset_id, ...rest }) => rest))
+          .select('id');
         if (iErr) throw new Error(`Inventory insert failed: ${iErr.message}`);
+        (inserted ?? []).forEach((row: any, idx: number) => {
+          insertedItems.push({ id: row.id, _preset_id: batch[idx]._preset_id ?? null });
+        });
+      }
+
+      // Create supply usage transactions for preset-matched items
+      const supplyTxns: any[] = [];
+      for (const { id: itemId, _preset_id } of insertedItems) {
+        if (!_preset_id || !presetSuppliesMap[_preset_id]) continue;
+        for (const ps of presetSuppliesMap[_preset_id]) {
+          const unitCost = ps.supplies?.unit_cost ?? null;
+          supplyTxns.push({
+            organization_id:   orgId!,
+            supply_id:         ps.supply_id,
+            transaction_type:  'USE',
+            quantity:          -Math.abs(ps.quantity),
+            unit_cost:         unitCost,
+            total_cost:        unitCost != null ? parseFloat((unitCost * ps.quantity).toFixed(2)) : null,
+            inventory_item_id: itemId,
+            notes:             'Auto-applied from product preset',
+          });
+        }
+      }
+      if (supplyTxns.length > 0) {
+        await supabase.from('supply_transactions').insert(supplyTxns);
       }
 
       // best-effort record — don't block if schema differs

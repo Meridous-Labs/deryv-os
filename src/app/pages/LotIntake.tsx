@@ -83,100 +83,37 @@ function NewLotModal({ open, onClose, orgId, userId, vendors, partners, onCreate
     handleClose();
   };
 
-  return (
-    <Modal open={open} onClose={handleClose} title="New LOT" width="max-w-2xl"
-      footer={<>
-        <button onClick={handleClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
-        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
-          {saving && <Loader2 size={12} className="animate-spin" />}Create LOT
-        </button>
-      </>}>
-      <div className="space-y-4">
-        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
-        <div className="grid grid-cols-2 gap-4">
-          <FormField label="Status">
-            <select className={selectCls} value={form.status} onChange={e => set('status', e.target.value)}>
-              {LOT_STATUSES.map(s => <option key={s}>{s}</option>)}
-            </select>
-          </FormField>
-          <FormField label="Total MSRP ($)">
-            <input type="number" className={inputCls} value={form.total_msrp} onChange={e => set('total_msrp', e.target.value)} placeholder="0.00" min="0" step="0.01" />
-          </FormField>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <FormField label="Purchase Date">
-            <input type="date" className={inputCls} value={form.purchase_date} onChange={e => set('purchase_date', e.target.value)} />
-          </FormField>
-          <FormField label="Arrival Date">
-            <input type="date" className={inputCls} value={form.arrival_date} onChange={e => set('arrival_date', e.target.value)} />
-          </FormField>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <FormField label="Vendor">
-            <select className={selectCls} value={form.vendor_id} onChange={e => set('vendor_id', e.target.value)}>
-              <option value="">— No vendor —</option>
-              {vendors.map((v: any) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
-          </FormField>
-          <FormField label="Funding Partner">
-            <select className={selectCls} value={form.funding_partner_id} onChange={e => set('funding_partner_id', e.target.value)}>
-              <option value="">— No partner —</option>
-              {partners.map((p: any) => <option key={p.id} value={p.id}>{p.company_name ?? p.name}</option>)}
-            </select>
-          </FormField>
-        </div>
-        <div className="grid grid-cols-3 gap-4">
-          <FormField label="Purchase Price ($)">
-            <input type="number" className={inputCls} value={form.purchase_price} onChange={e => set('purchase_price', e.target.value)} placeholder="0.00" min="0" step="0.01" />
-          </FormField>
-          <FormField label="Freight Cost ($)">
-            <input type="number" className={inputCls} value={form.freight_cost} onChange={e => set('freight_cost', e.target.value)} placeholder="0.00" min="0" step="0.01" />
-          </FormField>
-          <FormField label="Handling Cost ($)">
-            <input type="number" className={inputCls} value={form.handling_cost} onChange={e => set('handling_cost', e.target.value)} placeholder="0.00" min="0" step="0.01" />
-          </FormField>
-        </div>
-        <div className="grid grid-cols-3 gap-4">
-          <FormField label="Truckload #">
-            <input type="text" className={inputCls} value={form.truckload_number} onChange={e => set('truckload_number', e.target.value)} placeholder="TL-001" />
-          </FormField>
-          <FormField label="Pallet Count">
-            <input type="number" className={inputCls} value={form.pallet_count} onChange={e => set('pallet_count', e.target.value)} placeholder="0" min="0" />
-          </FormField>
-          <FormField label="Liquidation Source">
-            <input type="text" className={inputCls} value={form.liquidation_source} onChange={e => set('liquidation_source', e.target.value)} placeholder="e.g. B-Stock" />
-          </FormField>
-        </div>
-        <FormField label="Notes">
-          <textarea className={textareaCls} rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Optional notes..." />
-        </FormField>
-      </div>
-    </Modal>
-  );
 }
 
-function fmt(val: any, prefix = '') {
-  if (val === null || val === undefined || val === '') return null;
-  const n = Number(val);
-  if (!isNaN(n)) return `${prefix}${n.toLocaleString()}`;
-  return String(val);
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
 }
-
-function fmtMoney(val: any) {
-  if (val === null || val === undefined || val === '') return null;
-  const n = Number(val);
-  if (isNaN(n)) return null;
-  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-const LOT_SELECT = 'id, lot_id, status, total_msrp, recovery_amount, purchase_date, arrival_date, vendor_id, funding_partner_id, purchase_price, freight_cost, handling_cost, manual_landed_cost_override, truckload_number, pallet_count, liquidation_source, notes, created_at, vendors(name), funding_partners:partners!lots_funding_partner_id_fkey(company_name)';
-
 export function LotIntake() {
   const view = useSecondaryView();
   const { orgId, user, currentRole } = useAuth();
   const navigate = useNavigate();
   const [showNew, setShowNew] = useState(false);
   const [showManifest, setShowManifest] = useState(false);
+  const _sortInit = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.lotintake') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_sortInit.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_sortInit.dir ?? 'asc');
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    const nextCol = sortCol === col ? col : col;
+    setSortCol(nextCol);
+    setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.lotintake', JSON.stringify({ col: nextCol, dir: next }));
+  };
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -221,6 +158,9 @@ export function LotIntake() {
     enabled: true,
   });
 
+  const { data: presets } = useOrgQuery<any>('product_presets', orgId, {
+    select: '*, preset_supplies(supply_id, quantity, supplies(id, name, unit_cost))',
+  });
   const { data: partners, loading: partLoading } = useOrgQuery<any>('partners', orgId, {
     select: 'id, company_name, status, profit_split_percent',
     enabled: true,
@@ -469,8 +409,21 @@ export function LotIntake() {
     </div>
   ) : null;
 
+
+
+  const sorted = sortItems(filteredLots, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'lot_id') return item.lot_id;
+    if (col === 'vendor') return item.vendors?.name;
+    if (col === 'status') return item.status;
+    if (col === 'msrp') return Number(item.total_msrp ?? 0);
+    if (col === 'recovery') return Number(item.recovery_amount ?? 0);
+    if (col === 'purchase_date') return item.purchase_date;
+    if (col === 'arrival_date') return item.arrival_date;
+    return null;
+  });
+
   return (
-    <div className="p-3 sm:p-6 max-w-[1300px] space-y-4">
+    <div className="p-6 max-w-[1300px] space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">LOT Intake</h2>
@@ -581,13 +534,29 @@ export function LotIntake() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                    {['LOT ID', 'Vendor', 'Status', 'Total MSRP', 'Recovery', 'Purchase Date', 'Arrival Date'].map(h => (
-                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                    ))}
+                  {([
+                    { label: 'LOT ID', col: 'lot_id' },
+                    { label: 'Vendor', col: 'vendor' },
+                    { label: 'Status', col: 'status' },
+                    { label: 'Total MSRP', col: 'msrp' },
+                    { label: 'Recovery', col: 'recovery' },
+                    { label: 'Purchase Date', col: 'purchase_date' },
+                    { label: 'Arrival Date', col: 'arrival_date' },
+                  ] as const).map(({ label, col }) => (
+                    <th key={col} onClick={() => handleSort(col)}
+                      className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-gray-600 transition-colors">
+                      <span className="inline-flex items-center gap-1">
+                        {label}
+                        {sortCol === col
+                          ? <span className="text-[#3ECF8E]">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                          : <span className="opacity-0">↕</span>}
+                      </span>
+                    </th>
+                  ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredLots.map((lot: any, i: number) => {
+                  {sorted.map((lot: any, i: number) => {
                     const recovery = lot.total_msrp > 0
                       ? Math.round((Number(lot.recovery_amount || 0) / Number(lot.total_msrp)) * 100)
                       : null;
@@ -595,7 +564,7 @@ export function LotIntake() {
                       <tr
                         key={lot.id}
                         onClick={() => openDrawer(lot)}
-                        className={`hover:bg-gray-50/70 cursor-pointer ${i < filteredLots.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
+                        className={`hover:bg-gray-50/70 cursor-pointer ${i < sorted.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
                       >
                         <td className="px-5 py-3 text-[12px] font-mono font-medium text-gray-900">
                           #{lot.lot_id ? lot.lot_id.toUpperCase() : lot.id.slice(0, 8).toUpperCase()}
@@ -620,6 +589,7 @@ export function LotIntake() {
         </div>
       )}
 
+
       <NewLotModal
         open={showNew}
         onClose={() => setShowNew(false)}
@@ -637,6 +607,7 @@ export function LotIntake() {
         userId={user?.id}
         vendors={vendors}
         partners={partners}
+        presets={presets ?? []}
         onCreated={reload}
       />
 

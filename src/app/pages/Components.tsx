@@ -131,9 +131,31 @@ function OverviewView({ components, categories, role }: any) {
 
 // ─── Component Inventory ──────────────────────────────────────────────────────
 
+
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
+}
 function ComponentInventoryView({ components, categories, vendors, role, orgId, userId, onReload, filterProp }: any) {
   const [filterValues, setFilterValues] = useState<FilterValues>({});
   const [selected, setSelected] = useState<any>(null);
+  const _si = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.components') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_si.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_si.dir ?? 'asc');
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    setSortCol(col); setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.components', JSON.stringify({ col, dir: next }));
+  };
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<any>({});
   const [saving, setSaving] = useState(false);
@@ -334,8 +356,20 @@ function ComponentInventoryView({ components, categories, vendors, role, orgId, 
   const catById = (id: string) => categories.find((c: any) => c.id === id);
   const vendorById = (id: string) => vendors.find((v: any) => v.id === id);
 
+  const sorted = sortItems(filtered, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'name') return item.name;
+    if (col === 'category') return item.category_id;
+    if (col === 'vendor') return item.vendor_id;
+    if (col === 'sku') return item.sku;
+    if (col === 'cost') return Number(item.unit_cost ?? 0);
+    if (col === 'qty') return Number(item.quantity_available ?? 0);
+    if (col === 'reorder') return Number(item.reorder_point ?? 0);
+    if (col === 'status') return item.status;
+    return null;
+  });
+
   return (
-    <div className="p-3 sm:p-6 max-w-[1400px] space-y-4">
+    <div className="p-6 max-w-[1400px] space-y-4">
       {notFoundMsg && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-[13px]">
           {notFoundMsg}
@@ -361,63 +395,52 @@ function ComponentInventoryView({ components, categories, vendors, role, orgId, 
         {filtered.length === 0 ? (
           <div className="py-16 text-center text-[13px] text-gray-400">No components match the current filters.</div>
         ) : (
-          <>
-            {/* Mobile card list */}
-            <div className="sm:hidden divide-y divide-[rgba(0,0,0,0.05)]">
-              {filtered.map((c: any) => (
-                <div key={c.id} onClick={() => openDrawer(c)}
-                  className="px-3 py-3 hover:bg-gray-50 active:bg-gray-100 cursor-pointer">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-medium text-gray-900 truncate">{c.name}</p>
-                      <p className="text-[11px] text-gray-400 mt-0.5">{catById(c.category_id)?.name ?? '—'} · {c.sku ?? 'No SKU'}</p>
-                    </div>
-                    <StatusBadge status={c.status ?? 'ACTIVE'} />
-                  </div>
-                  <div className="flex items-center gap-3 mt-1.5">
-                    <span className={`text-[12px] font-medium ${c.quantity_available <= 0 ? 'text-red-500' : c.quantity_available <= (c.reorder_point ?? 0) ? 'text-amber-600' : 'text-gray-700'}`}>
-                      {c.quantity_available ?? 0} in stock
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-[rgba(0,0,0,0.06)] bg-gray-50">
+                {([
+                    { label: 'Name', col: 'name' },
+                    { label: 'Category', col: 'category' },
+                    { label: 'Vendor', col: 'vendor' },
+                    { label: 'SKU', col: 'sku' },
+                    { label: 'Unit Cost', col: 'cost' },
+                    { label: 'Qty Available', col: 'qty' },
+                    { label: 'Reorder Pt', col: 'reorder' },
+                    { label: 'Status', col: 'status' },
+                ] as const).map(({ label, col }) => (
+                  <th key={col} onClick={() => col && handleSort(col)}
+                    className={`text-left px-4 py-2.5 text-[10px] font-medium text-gray-400 uppercase tracking-wide bg-gray-50 border-b border-[rgba(0,0,0,0.06)] whitespace-nowrap ${col ? 'cursor-pointer select-none hover:text-gray-600 transition-colors' : ''}`}>
+                    <span className="inline-flex items-center gap-1">
+                      {label}
+                      {col && sortCol === col ? <span className="text-[#3ECF8E]">{sortDir === 'asc' ? '↑' : '↓'}</span> : col ? <span className="opacity-0">↕</span> : null}
                     </span>
-                    {canEditFinance(role) && <span className="text-[11px] text-gray-400">{fmt(c.unit_cost)} / unit</span>}
-                  </div>
-                </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((c: any, i: number) => (
+                <tr
+                  key={c.id}
+                  onClick={() => openDrawer(c)}
+                  className={`cursor-pointer hover:bg-gray-50 transition-colors ${i < sorted.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
+                >
+                  <Td><span className="font-medium text-gray-900">{c.name}</span></Td>
+                  <Td muted>{catById(c.category_id)?.name ?? '—'}</Td>
+                  <Td muted>{vendorById(c.vendor_id)?.company_name ?? vendorById(c.vendor_id)?.name ?? '—'}</Td>
+                  <Td muted>{c.sku ?? '—'}</Td>
+                  <Td right>{canEditFinance(role) ? fmt(c.unit_cost) : '—'}</Td>
+                  <Td right>
+                    <span className={c.quantity_available <= 0 ? 'text-red-500 font-medium' : c.quantity_available <= (c.reorder_point ?? 0) ? 'text-amber-600 font-medium' : 'text-gray-700'}>
+                      {c.quantity_available ?? 0}
+                    </span>
+                  </Td>
+                  <Td right muted>{c.reorder_point ?? '—'}</Td>
+                  <Td><StatusBadge status={c.status ?? 'ACTIVE'} /></Td>
+                </tr>
               ))}
-            </div>
-            {/* Desktop table */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-[rgba(0,0,0,0.06)] bg-gray-50">
-                    <Th>Name</Th><Th>Category</Th><Th>Vendor</Th><Th>SKU</Th>
-                    <Th right>Unit Cost</Th><Th right>Qty Available</Th><Th right>Reorder Pt</Th>
-                    <Th>Status</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((c: any, i: number) => (
-                    <tr
-                      key={c.id}
-                      onClick={() => openDrawer(c)}
-                      className={`cursor-pointer hover:bg-gray-50 transition-colors ${i < filtered.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}
-                    >
-                      <Td><span className="font-medium text-gray-900">{c.name}</span></Td>
-                      <Td muted>{catById(c.category_id)?.name ?? '—'}</Td>
-                      <Td muted>{vendorById(c.vendor_id)?.company_name ?? vendorById(c.vendor_id)?.name ?? '—'}</Td>
-                      <Td muted>{c.sku ?? '—'}</Td>
-                      <Td right>{canEditFinance(role) ? fmt(c.unit_cost) : '—'}</Td>
-                      <Td right>
-                        <span className={c.quantity_available <= 0 ? 'text-red-500 font-medium' : c.quantity_available <= (c.reorder_point ?? 0) ? 'text-amber-600 font-medium' : 'text-gray-700'}>
-                          {c.quantity_available ?? 0}
-                        </span>
-                      </Td>
-                      <Td right muted>{c.reorder_point ?? '—'}</Td>
-                      <Td><StatusBadge status={c.status ?? 'ACTIVE'} /></Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+            </tbody>
+          </table>
         )}
       </div>
 
@@ -633,7 +656,7 @@ function TransactionsView({ orgId, userId, components, role }: any) {
   };
 
   return (
-    <div className="p-3 sm:p-6 max-w-[1400px] space-y-4">
+    <div className="p-6 max-w-[1400px] space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">Component Transactions</h2>
@@ -864,7 +887,7 @@ function BundlesView({ orgId, userId, components, categories, role }: any) {
     itemsFor(bundleId).reduce((s: number, bi: any) => s + (bi.quantity ?? 1) * (bi.components?.unit_cost ?? 0), 0);
 
   return (
-    <div className="p-3 sm:p-6 max-w-[1400px] space-y-4">
+    <div className="p-6 max-w-[1400px] space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">Bundle Templates</h2>
@@ -1119,7 +1142,7 @@ function CategoriesView({ orgId, userId, categories, role, onReload }: any) {
   };
 
   return (
-    <div className="p-3 sm:p-6 max-w-[1400px] space-y-4">
+    <div className="p-6 max-w-[1400px] space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">Component Categories</h2>

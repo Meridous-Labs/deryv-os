@@ -309,15 +309,15 @@ export function TopBar() {
   return (
     <header className="h-[54px] border-b border-[rgba(0,0,0,0.08)] bg-white flex items-center flex-shrink-0 z-30 w-full">
       {/* Logo — overflow-hidden crops the whitespace padding baked into the image file */}
-      <div className="flex items-center px-4 flex-shrink-0 w-[200px]">
+      <div className="flex items-center px-3 sm:px-4 flex-shrink-0 sm:w-[200px]">
         <img src={DERYV_LOGO} alt="deryv" className="h-[35px] w-auto object-contain" />
       </div>
 
       {/* Divider */}
-      <div className="h-5 w-px bg-[rgba(0,0,0,0.09)] flex-shrink-0" />
+      <div className="h-5 w-px bg-[rgba(0,0,0,0.09)] flex-shrink-0 hidden sm:block" />
 
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-1.5 px-4 min-w-0">
+      {/* Breadcrumb — hidden on mobile, shown sm+ */}
+      <div className="hidden sm:flex items-center gap-1.5 px-4 min-w-0">
         <span className="text-[13px] text-gray-400 select-none hidden sm:block">deryv</span>
         {pageLabel && (
           <>
@@ -332,8 +332,8 @@ export function TopBar() {
         )}
         {subviewLabel && (
           <>
-            <span className="text-[13px] text-gray-300">/</span>
-            <span className="text-[13px] text-gray-500 truncate">{subviewLabel}</span>
+            <span className="text-[13px] text-gray-300 hidden sm:block">/</span>
+            <span className="text-[13px] text-gray-500 truncate hidden sm:block">{subviewLabel}</span>
           </>
         )}
       </div>

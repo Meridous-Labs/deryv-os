@@ -178,92 +178,6 @@ function CreateShipmentModal({ open, onClose, orgId, userId, orders, onCreated }
     setSaving(false); onCreated(); onClose(); reset();
   };
 
-  return (
-    <Modal open={open} onClose={onClose} title="Create Shipment"
-      footer={<>
-        <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
-        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
-          {saving && <Loader2 size={12} className="animate-spin" />}Create Shipment
-        </button>
-      </>}>
-      <div className="space-y-4">
-        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
-
-        <FormField label="Order" required>
-          <select className={selectCls} value={form.order_id} onChange={e => set('order_id', e.target.value)}>
-            <option value="">— Select order —</option>
-            {orders.map((o: any) => (
-              <option key={o.id} value={o.id}>
-                {o.order_id ? `#${o.order_id}` : `#${o.id.slice(0, 8).toUpperCase()}`}
-                {o.buyer_name ? ` — ${o.buyer_name}` : ''}
-              </option>
-            ))}
-          </select>
-        </FormField>
-
-        {/* Package dimensions */}
-        <FormField label="Fulfillment Type" required>
-          <select className={selectCls} value={form.fulfillment_type} onChange={e => set('fulfillment_type', e.target.value)}>
-            <option value="SHIP">Ship — Carrier Label</option>
-            <option value="LOCAL_PICKUP">Local Pickup</option>
-            <option value="BUYER_ARRANGED">Buyer Arranged Shipping</option>
-          </select>
-        </FormField>
-
-        {form.fulfillment_type === 'SHIP' && (
-        <div>
-          <label className="text-[11px] font-medium text-gray-500 mb-2 block uppercase tracking-wide">Package Dimensions (optional — required for rates)</label>
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Weight (oz)">
-              <input type="number" className={inputCls} value={form.weight_oz} onChange={e => set('weight_oz', e.target.value)} placeholder="16" min="0" step="0.1" />
-            </FormField>
-            <FormField label="Length (in)">
-              <input type="number" className={inputCls} value={form.length_in} onChange={e => set('length_in', e.target.value)} placeholder="12" min="0" step="0.1" />
-            </FormField>
-            <FormField label="Width (in)">
-              <input type="number" className={inputCls} value={form.width_in} onChange={e => set('width_in', e.target.value)} placeholder="8" min="0" step="0.1" />
-            </FormField>
-            <FormField label="Height (in)">
-              <input type="number" className={inputCls} value={form.height_in} onChange={e => set('height_in', e.target.value)} placeholder="4" min="0" step="0.1" />
-            </FormField>
-          </div>
-        </div>
-        )}
-
-        <FormField label="Notes">
-          <textarea className={textareaCls} rows={2} value={form.shipment_notes} onChange={e => set('shipment_notes', e.target.value)} placeholder="Optional notes..." />
-        </FormField>
-      </div>
-    </Modal>
-  );
-}
-
-// ── Shipment Drawer ───────────────────────────────────────────────────────────
-
-function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: any) {
-  const navigate = useNavigate();
-  const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({
-    carrier: shipment.carrier ?? '',
-    service: shipment.service ?? '',
-    tracking_number: shipment.tracking_number ?? '',
-    status: shipment.status,
-    estimated_delivery: shipment.estimated_delivery ?? '',
-    weight_oz: shipment.weight_oz != null ? String(shipment.weight_oz) : '',
-    length_in: shipment.length_in != null ? String(shipment.length_in) : '',
-    width_in: shipment.width_in != null ? String(shipment.width_in) : '',
-    height_in: shipment.height_in != null ? String(shipment.height_in) : '',
-    shipment_notes: shipment.shipment_notes ?? '',
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<null | 'deliver' | 'delete'>(null);
-  const [confirmLoading, setConfirmLoading] = useState(false);
-  const [rates, setRates] = useState<any[]>([]);
-  const [loadingRates, setLoadingRates] = useState(false);
-  const [creatingLabel, setCreatingLabel] = useState(false);
-  const [showRates, setShowRates] = useState(false);
-  const set = (k: string, v: string) => setEditForm(f => ({ ...f, [k]: v }));
 
   const orderNum = shipment.orders
     ? (shipment.orders.order_id ? `#${shipment.orders.order_id}` : `#${shipment.orders.id?.slice(0, 8).toUpperCase()}`)
@@ -654,11 +568,35 @@ function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: a
 
 // ── Main Shipping Page ────────────────────────────────────────────────────────
 
+
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
+}
 export function Shipping() {
   const view = useSecondaryView();
   const { orgId, user, currentRole: role } = useAuth();
   const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
+  const _sortInit = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.shipping') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_sortInit.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_sortInit.dir ?? 'asc');
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    const nextCol = sortCol === col ? col : col;
+    setSortCol(nextCol);
+    setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.shipping', JSON.stringify({ col: nextCol, dir: next }));
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [filterValues, setFilterValues] = useState<FilterValues>({});
@@ -799,6 +737,18 @@ export function Shipping() {
     }
   };
 
+
+
+  const sorted = sortItems(filteredShipments, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'order') return item.orders?.order_id ?? item.orders?.id;
+    if (col === 'shipto') return item.orders?.ship_to_name ?? item.orders?.buyer_name;
+    if (col === 'carrier') return item.carrier;
+    if (col === 'tracking') return item.tracking_number;
+    if (col === 'status') return item.status;
+    if (col === 'delivery') return item.estimated_delivery;
+    return null;
+  });
+
   return (
     <div className="p-3 sm:p-6 max-w-[1300px] space-y-5">
       {notFoundMsg && <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-[13px]">{notFoundMsg}</div>}
@@ -855,15 +805,28 @@ export function Shipping() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                      {['Order', 'Ship To', 'Carrier', 'Tracking', 'Status', 'Est. Delivery'].map(h => (
-                        <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      {([
+                          { label: 'Order', col: 'order' },
+                          { label: 'Ship To', col: 'shipto' },
+                          { label: 'Carrier', col: 'carrier' },
+                          { label: 'Tracking', col: 'tracking' },
+                          { label: 'Status', col: 'status' },
+                          { label: 'Est. Delivery', col: 'delivery' },
+                      ] as const).map(({ label, col }) => (
+                        <th key={col} onClick={() => handleSort(col)}
+                          className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-gray-600 transition-colors">
+                          <span className="inline-flex items-center gap-1">
+                            {label}
+                            {sortCol === col ? <span className="text-[#3ECF8E]">{sortDir === 'asc' ? '↑' : '↓'}</span> : <span className="opacity-0">↕</span>}
+                          </span>
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredShipments.map((shp: any, i: number) => (
+                    {sorted.map((shp: any, i: number) => (
                       <tr key={shp.id} onClick={() => setSelectedId(shp.id)}
-                        className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === shp.id ? 'bg-[#F0FDF4]' : ''} ${i < filteredShipments.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
+                        className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${selectedId === shp.id ? 'bg-[#F0FDF4]' : ''} ${i < sorted.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
                         <td className="px-5 py-3 text-[12px] font-mono text-gray-700">
                           {shp.orders ? (shp.orders.order_id ? `#${shp.orders.order_id}` : `#${shp.orders.id?.slice(0, 8).toUpperCase()}`) : '—'}
                         </td>
@@ -888,6 +851,7 @@ export function Shipping() {
             </>
           )}
         </div>
+
 
         {/* Scan to Pack panel */}
         <div className="bg-white rounded-xl border border-[rgba(0,0,0,0.07)] p-5">

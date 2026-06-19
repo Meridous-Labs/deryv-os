@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, Eye, EyeOff, Loader2, Save, Upload, Info, Hash } from 'lucide-react';
+import { Plus, Trash2, Eye, EyeOff, Loader2, Save, Upload, Info, Hash, Bookmark, Pencil, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useOrgQuery, updateRow, deleteRow, logActivity } from '../../lib/hooks';
 import { useSecondaryView } from '../components/SecondarySidebar';
@@ -50,22 +50,819 @@ function InviteMemberModal({ open, onClose, orgId, userId, onCreated }: any) {
           {saving && <Loader2 size={12} className="animate-spin" />}Send Invite
         </button>
       </>}>
-      <div className="space-y-4">
+      <div className="space-y-3">
         {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
-        <FormField label="Full Name" required><input className={inputCls} value={form.name} onChange={e => set('name', e.target.value)} placeholder="Jane Smith" /></FormField>
-        <FormField label="Email Address" required><input type="email" className={inputCls} value={form.email} onChange={e => set('email', e.target.value)} placeholder="jane@company.com" /></FormField>
-        <FormField label="Temporary Password" required><input type="password" className={inputCls} value={form.password} onChange={e => set('password', e.target.value)} placeholder="Min 8 characters" /></FormField>
-        <FormField label="Role"><select className={selectCls} value={form.role} onChange={e => set('role', e.target.value)}>{ROLES.map(r => <option key={r}>{r}</option>)}</select></FormField>
+        <FormField label="Name" required><input className={inputCls} value={form.name} onChange={e => set('name', e.target.value)} placeholder="Jane Smith" /></FormField>
+        <FormField label="Email" required><input type="email" className={inputCls} value={form.email} onChange={e => set('email', e.target.value)} placeholder="jane@company.com" /></FormField>
+        <FormField label="Temporary Password" required><input type="password" className={inputCls} value={form.password} onChange={e => set('password', e.target.value)} placeholder="Set a temporary password" /></FormField>
+        <FormField label="Role">
+          <select className={selectCls} value={form.role} onChange={e => set('role', e.target.value)}>
+            <option value="viewer">Viewer</option>
+            <option value="operator">Operator</option>
+            <option value="manager">Manager</option>
+            <option value="admin">Admin</option>
+          </select>
+        </FormField>
       </div>
     </Modal>
   );
 }
 
+function findBestPricingRule(pricingRules: any[], grade: string | null, condition: string | null): any | null {
+  if (!pricingRules?.length) return null;
+  // Grade+Condition → Grade only → Condition only → Default
+  const match = (g: any, c: any) => pricingRules.find(p =>
+    (g != null ? p.grade === g : p.grade == null) &&
+    (c != null ? p.condition === c : p.condition == null) &&
+    !(g == null && c == null && !p.is_default)
+  );
+  if (grade && condition) { const r = match(grade, condition); if (r) return r; }
+  if (grade) { const r = match(grade, null); if (r) return r; }
+  if (condition) { const r = match(null, condition); if (r) return r; }
+  return pricingRules.find(p => p.is_default) ?? null;
+}
+
+// ApplyConfirmModal: shows a preview and runs the batch update
+function ApplyConfirmModal({ orgId, title, description, onConfirm, onClose }: any) {
+  const [preview, setPreview] = useState<{ count: number; sample: string[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [done, setDone] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onConfirm('preview').then((result: any) => {
+      setPreview(result);
+      setLoading(false);
+    }).catch((e: any) => { setError(e.message); setLoading(false); });
+  }, []);
+
+  const run = async () => {
+    setApplying(true);
+    try {
+      const count = await onConfirm('apply');
+      setDone(count);
+    } catch (e: any) { setError(e.message); }
+    setApplying(false);
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Apply to Current Inventory"
+      footer={done != null ? (
+        <button onClick={onClose} className="px-4 py-2 text-[13px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg">Done</button>
+      ) : (
+        <>
+          <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">
+            Skip — Future inventory only
+          </button>
+          <button onClick={run} disabled={loading || applying || !preview?.count}
+            className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+            {applying && <Loader2 size={12} className="animate-spin" />}
+            Apply to {preview?.count ?? '…'} item{preview?.count !== 1 ? 's' : ''}
+          </button>
+        </>
+      )}>
+      <div className="space-y-3">
+        <p className="text-[13px] text-gray-700">{description}</p>
+        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+        {loading ? (
+          <div className="flex items-center gap-2 py-4 text-[13px] text-gray-400">
+            <Loader2 size={14} className="animate-spin" />Checking matching inventory…
+          </div>
+        ) : done != null ? (
+          <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-4 py-3">
+            <p className="text-[13px] font-semibold text-[#15803d]">Updated {done} item{done !== 1 ? 's' : ''} successfully.</p>
+          </div>
+        ) : preview?.count === 0 ? (
+          <p className="text-[13px] text-gray-400 py-2">No matching inventory items found.</p>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-[12px] text-gray-500">{preview?.count} matching item{preview?.count !== 1 ? 's' : ''} will be updated:</p>
+            <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-1">
+              {preview?.sample.map((s, i) => <p key={i} className="text-[12px] text-gray-700 truncate">{s}</p>)}
+              {(preview?.count ?? 0) > 5 && <p className="text-[11px] text-gray-400">…and {(preview?.count ?? 0) - 5} more</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ── Pricing Presets ───────────────────────────────────────────────────────────
+const PRICING_MODES = [
+  { value: 'pct', label: '% of MSRP' },
+  { value: 'sub', label: 'MSRP − $' },
+  { value: 'add', label: 'MSRP + $' },
+];
+
+const GRADES_LIST = ['A+', 'A', 'B+', 'B', 'C+', 'C', 'F'];
+const CONDITIONS_LIST = [
+  { label: 'New', value: 'NEW' }, { label: 'Like New', value: 'LIKE_NEW' },
+  { label: 'Open Box', value: 'OPEN_BOX' }, { label: 'Refurbished', value: 'REFURBISHED' },
+  { label: 'Good', value: 'GOOD' }, { label: 'Fair', value: 'FAIR' },
+  { label: 'Used', value: 'USED' }, { label: 'Poor', value: 'POOR' },
+  { label: 'Damaged', value: 'DAMAGED' }, { label: 'Salvage', value: 'SALVAGE' },
+  { label: 'Parts Only', value: 'PARTS' },
+];
+
+function PricingPresetsView({ orgId, role }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [newRow, setNewRow] = useState({ grade: '', condition: '', mode: 'pct', value: '', is_default: false });
+  const [addError, setAddError] = useState<string | null>(null);
+  const canEdit = ['admin', 'manager'].includes(role);
+
+  const load = async () => {
+    setLoading(true);
+    const { data } = await supabase.from('pricing_presets').select('*')
+      .eq('organization_id', orgId).order('is_default', { ascending: false }).order('grade').order('condition');
+    setRows(data ?? []);
+    setLoading(false);
+  };
+  useEffect(() => { if (orgId) load(); }, [orgId]);
+
+  const updateRow = async (id: string, field: string, val: any) => {
+    const updatedRows = rows.map(r => r.id === id ? { ...r, [field]: val } : r);
+    setRows(updatedRows);
+    setSaving(id);
+    await supabase.from('pricing_presets').update({ [field]: val }).eq('id', id);
+    setSaving(null);
+    // Offer apply after mode or value change
+    if (field === 'mode' || field === 'value') {
+      const updatedRule = updatedRows.find(r => r.id === id);
+      if (updatedRule) setApplyRule(updatedRule);
+    }
+  };
+
+  const deleteRow = async (id: string) => {
+    await supabase.from('pricing_presets').delete().eq('id', id);
+    setRows(prev => prev.filter(r => r.id !== id));
+  };
+
+  const [applyRule, setApplyRule] = useState<any>(null);
+
+  const addRow = async () => {
+    if (!newRow.value || parseFloat(newRow.value) <= 0) { setAddError('Value is required.'); return; }
+    if (!newRow.grade && !newRow.condition && !newRow.is_default) { setAddError('Select a grade, condition, or mark as default.'); return; }
+    setAddError(null);
+    const { data, error } = await supabase.from('pricing_presets').insert({
+      organization_id: orgId,
+      grade: newRow.grade || null,
+      condition: newRow.condition || null,
+      mode: newRow.mode,
+      value: parseFloat(newRow.value),
+      is_default: newRow.is_default,
+    }).select('*');
+    if (error) { setAddError(error.message); return; }
+    setRows(prev => [...prev, ...(data ?? [])]);
+    setNewRow({ grade: '', condition: '', mode: 'pct', value: '', is_default: false });
+    setApplyRule(data?.[0] ?? null);
+  };
+
+  const handlePricingApply = (rule: any) => async (mode: 'preview' | 'apply') => {
+    // Build query filters based on grade/condition
+    let query = supabase.from('inventory_items')
+      .select('id, product_title, msrp, grade, condition', { count: 'exact' })
+      .eq('organization_id', orgId)
+      .not('msrp', 'is', null);
+    if (rule.grade) query = query.eq('grade', rule.grade);
+    if (rule.condition) query = query.eq('condition', rule.condition);
+    const { data: items, count } = await query;
+    const matched = (items ?? []).filter((i: any) => i.msrp && i.msrp > 0);
+    if (mode === 'preview') {
+      return { count: matched.length, sample: matched.slice(0, 5).map((i: any) => i.product_title || i.id) };
+    }
+    // Load all pricing rules for accurate priority resolution
+    const { data: allRules } = await supabase.from('pricing_presets').select('*').eq('organization_id', orgId);
+    let updated = 0;
+    for (const item of matched) {
+      const bestRule = findBestPricingRule(allRules ?? [], item.grade, item.condition);
+      const newPrice = applyPricingRuleCalc(item.msrp, bestRule);
+      if (newPrice != null) {
+        await supabase.from('inventory_items').update({ current_asking_price: newPrice }).eq('id', item.id);
+        updated++;
+      }
+    }
+    return updated;
+  };
+
+  const condLabel = (v: string) => CONDITIONS_LIST.find(c => c.value === v)?.label ?? v;
+  const ruleLabel = (r: any) => {
+    if (r.mode === 'pct') return `${r.value}% of MSRP`;
+    if (r.mode === 'sub') return `MSRP − $${r.value}`;
+    return `MSRP + $${r.value}`;
+  };
+
+  return (
+    <div className="space-y-5">
+      {applyRule && (
+        <ApplyConfirmModal
+          orgId={orgId}
+          title="Apply to Current Inventory"
+          description={`Recalculate asking prices for all matching items with MSRP set${applyRule.grade ? `, Grade ${applyRule.grade}` : ''}${applyRule.condition ? `, ${applyRule.condition}` : ''}${applyRule.is_default ? ' (all items with MSRP)' : ''}.`}
+          onConfirm={handlePricingApply(applyRule)}
+          onClose={() => setApplyRule(null)}
+        />
+      )}
+      <p className="text-[13px] text-gray-500 leading-relaxed">
+        Set asking price rules by grade, condition, or both. When adding inventory, the most specific matching rule applies automatically.
+        Priority: <span className="font-medium text-gray-700">Grade + Condition</span> → Grade only → Condition only → Default.
+      </p>
+
+      <div className="bg-white rounded-xl border border-[rgba(0,0,0,0.07)] overflow-hidden">
+        {/* Header */}
+        <div className="grid grid-cols-[1fr_1fr_1fr_120px_32px] gap-3 px-4 py-2 bg-gray-50 border-b border-[rgba(0,0,0,0.06)]">
+          {['Grade', 'Condition', 'Rule', 'Value', ''].map(h => (
+            <p key={h} className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{h}</p>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="p-8 text-center"><Loader2 size={16} className="animate-spin text-gray-300 mx-auto" /></div>
+        ) : rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-gray-400">No pricing rules yet. Add one below.</p>
+        ) : (
+          <div className="divide-y divide-[rgba(0,0,0,0.05)]">
+            {rows.map(r => (
+              <div key={r.id} className={`grid grid-cols-[1fr_1fr_1fr_120px_32px] gap-3 px-4 py-2.5 items-center ${r.is_default ? 'bg-[#F0FDF4]' : ''}`}>
+                <p className="text-[13px] text-gray-700">{r.grade ?? <span className="text-gray-400 text-[12px]">All grades</span>}</p>
+                <p className="text-[13px] text-gray-700">{r.condition ? condLabel(r.condition) : <span className="text-gray-400 text-[12px]">All conditions</span>}</p>
+                {canEdit ? (
+                  <select value={r.mode} onChange={e => updateRow(r.id, 'mode', e.target.value)}
+                    className="text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg px-2 py-1 focus:outline-none bg-white">
+                    {PRICING_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                ) : <p className="text-[13px] text-gray-700">{PRICING_MODES.find(m => m.value === r.mode)?.label}</p>}
+                {canEdit ? (
+                  <div className="flex items-center gap-1">
+                    <input type="number" value={r.value} min="0" step={r.mode === 'pct' ? '1' : '0.01'}
+                      onChange={e => updateRow(r.id, 'value', parseFloat(e.target.value) || 0)}
+                      className="w-full px-2 py-1 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none" />
+                    {saving === r.id && <Loader2 size={10} className="animate-spin text-gray-300 flex-shrink-0" />}
+                  </div>
+                ) : <p className="text-[13px] text-gray-700 tabular-nums">{ruleLabel(r)}</p>}
+                {canEdit && (
+                  <button onClick={() => deleteRow(r.id)}
+                    className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors">
+                    <Trash2 size={12} />
+                  </button>
+                )}
+                {r.is_default && <span className="col-span-5 -mt-1 text-[10px] font-medium text-[#15803d]">Default — applies when no grade/condition rule matches</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add new rule */}
+      {canEdit && (
+        <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+          <p className="text-[12px] font-semibold text-gray-600">Add Rule</p>
+          {addError && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{addError}</p>}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Grade</label>
+              <select className={selectCls} value={newRow.grade} onChange={e => setNewRow(r => ({ ...r, grade: e.target.value, is_default: false }))}>
+                <option value="">— Any —</option>
+                {GRADES_LIST.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Condition</label>
+              <select className={selectCls} value={newRow.condition} onChange={e => setNewRow(r => ({ ...r, condition: e.target.value, is_default: false }))}>
+                <option value="">— Any —</option>
+                {CONDITIONS_LIST.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Method</label>
+              <select className={selectCls} value={newRow.mode} onChange={e => setNewRow(r => ({ ...r, mode: e.target.value }))}>
+                {PRICING_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Value</label>
+              <input type="number" className={inputCls} placeholder={newRow.mode === 'pct' ? '80' : '10.00'}
+                value={newRow.value} onChange={e => setNewRow(r => ({ ...r, value: e.target.value }))}
+                min="0" step={newRow.mode === 'pct' ? '1' : '0.01'} />
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={newRow.is_default}
+                onChange={e => setNewRow(r => ({ ...r, is_default: e.target.checked, grade: '', condition: '' }))}
+                className="w-3.5 h-3.5 accent-gray-800" />
+              <span className="text-[13px] text-gray-600">Set as default fallback rule</span>
+            </label>
+            <button onClick={addRow}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg">
+              <Plus size={13} />Add Rule
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── Product Presets ───────────────────────────────────────────────────────────
+function PresetModal({ preset, onClose, onSaved, orgId }: any) {
+  const [form, setForm] = useState({
+    brand: preset?.brand ?? '',
+    model: preset?.model ?? '',
+    product_title: preset?.product_title ?? '',
+    category: preset?.category ?? '',
+    msrp: preset?.msrp != null ? String(preset.msrp) : '',
+    weight_oz: preset?.weight_oz != null ? String(preset.weight_oz) : '',
+    length_in: preset?.length_in != null ? String(preset.length_in) : '',
+    width_in: preset?.width_in != null ? String(preset.width_in) : '',
+    height_in: preset?.height_in != null ? String(preset.height_in) : '',
+    notes: preset?.notes ?? '',
+  });
+  const [presetSupplies, setPresetSupplies] = useState<any[]>([]);
+  const [allSupplies, setAllSupplies] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [addSupplyId, setAddSupplyId] = useState('');
+  const [addSupplyQty, setAddSupplyQty] = useState('1');
+  const [showNewSupply, setShowNewSupply] = useState(false);
+  const [newSupplySaving, setNewSupplySaving] = useState(false);
+  const [newSupplyError, setNewSupplyError] = useState<string | null>(null);
+  const EMPTY_NEW_SUPPLY = { name: '', unit_of_measure: '', unit_cost: '', quantity_on_hand: '0' };
+  const [newSupplyForm, setNewSupplyForm] = useState(EMPTY_NEW_SUPPLY);
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  const reloadSupplies = async () => {
+    const { data } = await supabase.from('supplies').select('id, name, unit_of_measure, unit_cost')
+      .eq('organization_id', orgId).order('name');
+    setAllSupplies(data ?? []);
+  };
+
+  const createAndAddSupply = async () => {
+    if (!newSupplyForm.name.trim()) { setNewSupplyError('Name is required.'); return; }
+    setNewSupplySaving(true); setNewSupplyError(null);
+    const { data, error: err } = await supabase.from('supplies').insert({
+      organization_id: orgId,
+      name: newSupplyForm.name.trim(),
+      unit_of_measure: newSupplyForm.unit_of_measure.trim() || null,
+      unit_cost: parseFloat(newSupplyForm.unit_cost) || null,
+      quantity_on_hand: parseFloat(newSupplyForm.quantity_on_hand) || 0,
+      status: 'ACTIVE',
+    }).select('id, name, unit_of_measure, unit_cost');
+    if (err) { setNewSupplyError(err.message); setNewSupplySaving(false); return; }
+    const newSupply = data?.[0];
+    if (newSupply) {
+      await reloadSupplies();
+      // Immediately add to preset
+      const qty = parseFloat(addSupplyQty) || 1;
+      if (preset?.id) {
+        const { data: ps } = await supabase.from('preset_supplies')
+          .insert({ preset_id: preset.id, supply_id: newSupply.id, quantity: qty })
+          .select('id, supply_id, quantity, supplies(id, name, unit_of_measure, unit_cost)');
+        setPresetSupplies(prev => [...prev, ...(ps ?? [])]);
+      } else {
+        setPresetSupplies(prev => [...prev, { supply_id: newSupply.id, quantity: qty, supplies: newSupply }]);
+      }
+    }
+    setShowNewSupply(false);
+    setNewSupplyForm(EMPTY_NEW_SUPPLY);
+    setNewSupplySaving(false);
+    setAddSupplyQty('1');
+  };
+
+  useEffect(() => {
+    reloadSupplies();
+    if (preset?.id) {
+      supabase.from('preset_supplies').select('id, supply_id, quantity, supplies(id, name, unit_of_measure, unit_cost)')
+        .eq('preset_id', preset.id)
+        .then(({ data }) => setPresetSupplies(data ?? []));
+    }
+  }, [preset?.id, orgId]);
+
+  const addSupply = async (presetId: string) => {
+    if (!addSupplyId || !addSupplyQty) return;
+    const { data } = await supabase.from('preset_supplies')
+      .insert({ preset_id: presetId, supply_id: addSupplyId, quantity: parseFloat(addSupplyQty) || 1 })
+      .select('id, supply_id, quantity, supplies(id, name, unit_of_measure, unit_cost)');
+    setPresetSupplies(prev => [...prev, ...(data ?? [])]);
+    setAddSupplyId(''); setAddSupplyQty('1');
+  };
+
+  const removeSupply = async (psId: string) => {
+    await supabase.from('preset_supplies').delete().eq('id', psId);
+    setPresetSupplies(prev => prev.filter(p => p.id !== psId));
+  };
+
+  const [showApply, setShowApply] = useState(false);
+  const [savedPayload, setSavedPayload] = useState<any>(null);
+
+  const save = async () => {
+    if (!form.brand.trim() || !form.model.trim()) { setError('Brand and model are required.'); return; }
+    setSaving(true); setError(null);
+    try {
+      const payload = {
+        organization_id: orgId,
+        brand: form.brand.trim(),
+        model: form.model.trim(),
+        product_title: form.product_title.trim() || null,
+        category: form.category.trim() || null,
+        msrp: parseFloat(form.msrp) || null,
+        weight_oz: parseFloat(form.weight_oz) || null,
+        length_in: parseFloat(form.length_in) || null,
+        width_in: parseFloat(form.width_in) || null,
+        height_in: parseFloat(form.height_in) || null,
+        notes: form.notes.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+      let savedId = preset?.id;
+      if (preset?.id) {
+        const { error: err } = await supabase.from('product_presets').update(payload).eq('id', preset.id);
+        if (err) throw new Error(err.message);
+      } else {
+        const { data, error: err } = await supabase.from('product_presets').insert(payload).select('id');
+        if (err) throw new Error(err.message);
+        savedId = data?.[0]?.id;
+        if (savedId && presetSupplies.length > 0) {
+          await supabase.from('preset_supplies').insert(
+            presetSupplies.map(ps => ({ preset_id: savedId, supply_id: ps.supply_id, quantity: ps.quantity }))
+          );
+        }
+      }
+      onSaved();
+      setSavedPayload(payload);
+      setSaving(false);
+      setShowApply(true); // offer apply to current inventory
+    } catch (e: any) { setError(e.message); setSaving(false); }
+  };
+
+  const handleProductPresetApply = async (mode: 'preview' | 'apply') => {
+    if (!savedPayload) return { count: 0, sample: [] };
+    // Fetch matching items by brand + model
+    const { data: items, count } = await supabase
+      .from('inventory_items')
+      .select('id, product_title, msrp, grade, condition', { count: 'exact' })
+      .eq('organization_id', orgId)
+      .eq('brand', savedPayload.brand)
+      .eq('model', savedPayload.model);
+    const matched = items ?? [];
+    if (mode === 'preview') {
+      return { count: count ?? 0, sample: matched.slice(0, 5).map((i: any) => i.product_title || i.id) };
+    }
+    // Load pricing presets for asking price recalc
+    const { data: pricingRules } = await supabase.from('pricing_presets').select('*').eq('organization_id', orgId);
+    let updated = 0;
+    for (let i = 0; i < matched.length; i += 50) {
+      const batch = matched.slice(i, i + 50);
+      for (const item of batch) {
+        const updates: any = {};
+        if (savedPayload.product_title) updates.product_title = savedPayload.product_title;
+        if (savedPayload.category) updates.category = savedPayload.category;
+        if (savedPayload.weight_oz != null) updates.weight_oz = savedPayload.weight_oz;
+        if (savedPayload.length_in != null) updates.length_in = savedPayload.length_in;
+        if (savedPayload.width_in != null) updates.width_in = savedPayload.width_in;
+        if (savedPayload.height_in != null) updates.height_in = savedPayload.height_in;
+        // MSRP update + asking price recalc
+        const newMsrp = savedPayload.msrp ?? item.msrp;
+        if (savedPayload.msrp != null) updates.msrp = savedPayload.msrp;
+        if (newMsrp) {
+          const rule = findBestPricingRule(pricingRules ?? [], item.grade, item.condition);
+          const newPrice = applyPricingRuleCalc(newMsrp, rule);
+          if (newPrice != null) updates.current_asking_price = newPrice;
+        }
+        if (Object.keys(updates).length > 0) {
+          await supabase.from('inventory_items').update(updates).eq('id', item.id);
+          updated++;
+        }
+      }
+    }
+    return updated;
+  };
+
+  const availableSupplies = allSupplies.filter(s => !presetSupplies.some(ps => ps.supply_id === s.id));
+
+  return (
+    <>
+    {showApply && (
+      <ApplyConfirmModal
+        orgId={orgId}
+        title="Apply to Current Inventory"
+        description={`Update all inventory items with brand "${savedPayload?.brand}" and model "${savedPayload?.model}" with the new preset values (title, category, MSRP, dimensions). Asking prices will be recalculated.`}
+        onConfirm={handleProductPresetApply}
+        onClose={() => { setShowApply(false); onClose(); }}
+      />
+    )}
+    <Modal open={!showApply} onClose={onClose} title={preset?.id ? 'Edit Preset' : 'New Preset'} width="max-w-2xl"
+      footer={<>
+        <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
+        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+          {saving && <Loader2 size={12} className="animate-spin" />}Save Preset
+        </button>
+      </>}>
+      <div className="space-y-4">
+        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+
+        {/* Identity */}
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="Brand" required>
+            <input className={inputCls} value={form.brand} onChange={e => set('brand', e.target.value)} placeholder="Apple" />
+          </FormField>
+          <FormField label="Model" required>
+            <input className={inputCls} value={form.model} onChange={e => set('model', e.target.value)} placeholder="iPhone 15 Pro" />
+          </FormField>
+        </div>
+        <FormField label="Product Title">
+          <input className={inputCls} value={form.product_title} onChange={e => set('product_title', e.target.value)} placeholder="Apple iPhone 15 Pro 128GB Space Black" />
+        </FormField>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="Category">
+            <input className={inputCls} value={form.category} onChange={e => set('category', e.target.value)} placeholder="Electronics" />
+          </FormField>
+          <FormField label="Default MSRP ($)">
+            <input type="number" className={inputCls} value={form.msrp} onChange={e => set('msrp', e.target.value)} placeholder="299.99" min="0" step="0.01" />
+          </FormField>
+        </div>
+
+        {/* Physical specs */}
+        <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Physical Specs</p>
+          <div className="grid grid-cols-4 gap-3">
+            <FormField label="Weight (oz)">
+              <input type="number" className={inputCls} value={form.weight_oz} onChange={e => set('weight_oz', e.target.value)} placeholder="16.0" min="0" step="0.1" />
+            </FormField>
+            <FormField label="Length (in)">
+              <input type="number" className={inputCls} value={form.length_in} onChange={e => set('length_in', e.target.value)} placeholder="12.0" min="0" step="0.1" />
+            </FormField>
+            <FormField label="Width (in)">
+              <input type="number" className={inputCls} value={form.width_in} onChange={e => set('width_in', e.target.value)} placeholder="8.0" min="0" step="0.1" />
+            </FormField>
+            <FormField label="Height (in)">
+              <input type="number" className={inputCls} value={form.height_in} onChange={e => set('height_in', e.target.value)} placeholder="4.0" min="0" step="0.1" />
+            </FormField>
+          </div>
+        </div>
+
+        {/* Default supplies */}
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Default Supplies</p>
+          <p className="text-[11px] text-gray-400">These supplies are automatically consumed when this preset is applied to an inventory item.</p>
+
+          {/* Existing preset supply rows */}
+          {presetSupplies.length > 0 && (
+            <div className="border border-[rgba(0,0,0,0.07)] rounded-lg overflow-hidden divide-y divide-[rgba(0,0,0,0.05)]">
+              {presetSupplies.map(ps => (
+                <div key={ps.id ?? ps.supply_id} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-gray-800">{ps.supplies?.name ?? ps.supply_id}</p>
+                    {ps.supplies?.unit_of_measure && <p className="text-[11px] text-gray-400">{ps.supplies.unit_of_measure}{ps.supplies?.unit_cost != null ? ` · $${Number(ps.supplies.unit_cost).toFixed(2)}` : ''}</p>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="number" value={ps.quantity} min="0.01" step="0.01"
+                      onChange={async e => {
+                        const q = parseFloat(e.target.value) || 1;
+                        setPresetSupplies(prev => prev.map(p => p.id === ps.id ? { ...p, quantity: q } : p));
+                        if (ps.id) await supabase.from('preset_supplies').update({ quantity: q }).eq('id', ps.id);
+                      }}
+                      className="w-16 px-2 py-1 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20" />
+                    <button onClick={() => ps.id ? removeSupply(ps.id) : setPresetSupplies(prev => prev.filter(p => p.supply_id !== ps.supply_id))}
+                      className="w-6 h-6 flex items-center justify-center text-gray-300 hover:text-red-400 transition-colors">
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add from existing supplies */}
+          <div className="flex items-center gap-2">
+            <select className={selectCls + ' flex-1'} value={addSupplyId}
+              onChange={e => { if (e.target.value === '__new__') { setShowNewSupply(true); setAddSupplyId(''); } else setAddSupplyId(e.target.value); }}>
+              <option value="">{availableSupplies.length === 0 ? '— No supplies yet —' : '— Select a supply —'}</option>
+              {availableSupplies.map(s => <option key={s.id} value={s.id}>{s.name}{s.unit_of_measure ? ` (${s.unit_of_measure})` : ''}</option>)}
+              <option value="__new__">+ Create new supply…</option>
+            </select>
+            <input type="number" value={addSupplyQty} onChange={e => setAddSupplyQty(e.target.value)}
+              className="w-16 px-2 py-1.5 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20"
+              min="0.01" step="0.01" placeholder="Qty" />
+            <button
+              onClick={() => {
+                if (!addSupplyId) return;
+                if (preset?.id) {
+                  addSupply(preset.id);
+                } else {
+                  setPresetSupplies(prev => [...prev, {
+                    supply_id: addSupplyId,
+                    quantity: parseFloat(addSupplyQty) || 1,
+                    supplies: allSupplies.find(s => s.id === addSupplyId),
+                  }]);
+                  setAddSupplyId(''); setAddSupplyQty('1');
+                }
+              }}
+              disabled={!addSupplyId}
+              className="px-3 py-1.5 text-[13px] font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40 whitespace-nowrap">
+              Add
+            </button>
+          </div>
+
+          {/* Inline create new supply form */}
+          {showNewSupply && (
+            <div className="border border-[#BBF7D0] bg-[#F0FDF4] rounded-xl p-4 space-y-3">
+              <p className="text-[12px] font-semibold text-[#15803d]">Create New Supply</p>
+              <p className="text-[11px] text-[#16a34a]">This supply will be added to your Supplies page and immediately available here.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Name" required>
+                  <input className={inputCls} value={newSupplyForm.name} onChange={e => setNewSupplyForm(f => ({ ...f, name: e.target.value }))} placeholder="Poly Bag 6x9" />
+                </FormField>
+                <FormField label="Unit of Measure">
+                  <input className={inputCls} value={newSupplyForm.unit_of_measure} onChange={e => setNewSupplyForm(f => ({ ...f, unit_of_measure: e.target.value }))} placeholder="ea, box, roll…" />
+                </FormField>
+                <FormField label="Unit Cost ($)">
+                  <input type="number" className={inputCls} value={newSupplyForm.unit_cost} onChange={e => setNewSupplyForm(f => ({ ...f, unit_cost: e.target.value }))} placeholder="0.25" min="0" step="0.01" />
+                </FormField>
+                <FormField label="Starting Qty on Hand">
+                  <input type="number" className={inputCls} value={newSupplyForm.quantity_on_hand} onChange={e => setNewSupplyForm(f => ({ ...f, quantity_on_hand: e.target.value }))} placeholder="0" min="0" step="1" />
+                </FormField>
+              </div>
+              {newSupplyError && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{newSupplyError}</p>}
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => { setShowNewSupply(false); setNewSupplyForm(EMPTY_NEW_SUPPLY); setNewSupplyError(null); }}
+                  className="px-3 py-1.5 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-white">
+                  Cancel
+                </button>
+                <button onClick={createAndAddSupply} disabled={newSupplySaving}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium bg-[#3ECF8E] hover:bg-[#38c484] text-white rounded-lg disabled:opacity-60">
+                  {newSupplySaving && <Loader2 size={11} className="animate-spin" />}Create &amp; Add
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <FormField label="Notes">
+          <textarea className="w-full px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white resize-none" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Any additional notes about this product..." />
+        </FormField>
+      </div>
+    </Modal>
+    </>
+  );
+}
+
+function ProductPresetsView({ orgId, userId, role }: any) {
+  const [presets, setPresets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
+  const [search, setSearch] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<any>(null);
+
+  const load = async () => {
+    setLoading(true);
+    const { data, error: err } = await supabase
+      .from('product_presets')
+      .select('*')
+      .eq('organization_id', orgId)
+      .order('brand').order('model');
+    if (err) setError(err.message);
+    else setPresets(data ?? []);
+    setLoading(false);
+  };
+
+  useEffect(() => { if (orgId) load(); }, [orgId]);
+
+  const filtered = presets.filter(p =>
+    !search || `${p.brand} ${p.model}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const deletePreset = async (id: string) => {
+    await supabase.from('product_presets').delete().eq('id', id);
+    setConfirmDelete(null);
+    load();
+  };
+
+  const canEdit = ['admin', 'manager'].includes(role);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[13px] text-gray-500">Save brand + model combinations with physical specs so they auto-fill when processing inventory items.</p>
+        </div>
+        {canEdit && (
+          <button onClick={() => { setEditing(null); setShowModal(true); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg flex-shrink-0">
+            <Plus size={13} />New Preset
+          </button>
+        )}
+      </div>
+
+      <div className="relative">
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search presets..."
+          className="w-full pl-3 pr-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3ECF8E]/20 focus:border-[#3ECF8E] bg-white" />
+      </div>
+
+      <div className="bg-white rounded-xl border border-[rgba(0,0,0,0.07)] overflow-hidden">
+        {loading ? (
+          <div className="space-y-0">{[1,2,3].map(i => <div key={i} className="h-14 border-b border-[rgba(0,0,0,0.04)] animate-pulse bg-gray-50" />)}</div>
+        ) : error ? (
+          <p className="px-5 py-8 text-center text-[13px] text-red-500">{error}</p>
+        ) : filtered.length === 0 ? (
+          <div className="px-5 py-12 text-center">
+            <Bookmark size={24} className="text-gray-200 mx-auto mb-2" />
+            <p className="text-[13px] text-gray-400">{search ? 'No presets match your search.' : 'No presets yet. Add one to speed up inventory processing.'}</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-[rgba(0,0,0,0.05)]">
+            {/* Header */}
+            <div className="grid grid-cols-[1fr_60px_80px_80px_80px_80px_auto] gap-3 px-4 py-2 bg-gray-50 border-b border-[rgba(0,0,0,0.06)]">
+              {['Brand / Model', 'Weight', 'L', 'W', 'H', 'Notes', ''].map(h => (
+                <p key={h} className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{h}</p>
+              ))}
+            </div>
+            {filtered.map(p => (
+              <div key={p.id} className="grid grid-cols-[1fr_60px_80px_80px_80px_80px_auto] gap-3 px-4 py-3 items-center hover:bg-gray-50/60 transition-colors">
+                <div>
+                  <p className="text-[13px] font-medium text-gray-900">{p.brand}</p>
+                  <p className="text-[11px] text-gray-400">{p.model}</p>
+                </div>
+                <p className="text-[12px] text-gray-600 tabular-nums">{p.weight_oz != null ? `${p.weight_oz} oz` : '—'}</p>
+                <p className="text-[12px] text-gray-600 tabular-nums">{p.length_in != null ? `${p.length_in}"` : '—'}</p>
+                <p className="text-[12px] text-gray-600 tabular-nums">{p.width_in != null ? `${p.width_in}"` : '—'}</p>
+                <p className="text-[12px] text-gray-600 tabular-nums">{p.height_in != null ? `${p.height_in}"` : '—'}</p>
+                <p className="text-[11px] text-gray-400 truncate">{p.notes || '—'}</p>
+                {canEdit && (
+                  <div className="flex items-center gap-1 justify-end">
+                    <button onClick={() => { setEditing(p); setShowModal(true); }}
+                      className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors">
+                      <Pencil size={12} />
+                    </button>
+                    <button onClick={() => setConfirmDelete(p)}
+                      className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showModal && (
+        <PresetModal
+          preset={editing}
+          orgId={orgId}
+          onClose={() => { setShowModal(false); setEditing(null); }}
+          onSaved={load}
+        />
+      )}
+
+      {confirmDelete && (
+        <Modal open onClose={() => setConfirmDelete(null)} title="Delete Preset"
+          footer={<>
+            <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
+            <button onClick={() => deletePreset(confirmDelete.id)} className="px-4 py-2 text-[13px] font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50">Delete</button>
+          </>}>
+          <p className="text-[13px] text-gray-700">Delete the preset for <span className="font-medium">{confirmDelete.brand} {confirmDelete.model}</span>? This won't affect existing inventory items.</p>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
+}
 export function Settings() {
   const view = useSecondaryView();
   const { orgId, user, currentOrg, currentRole, refreshMemberships, signOut } = useAuth();
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [showInvite, setShowInvite] = useState(false);
+  const _sortInit = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.settings') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_sortInit.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_sortInit.dir ?? 'asc');
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    const nextCol = sortCol === col ? col : col;
+    setSortCol(nextCol);
+    setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.settings', JSON.stringify({ col: nextCol, dir: next }));
+  };
   const [savingOrg, setSavingOrg] = useState(false);
   const [orgSaved, setOrgSaved] = useState(false);
   const [notifSaved, setNotifSaved] = useState(false);
@@ -266,8 +1063,16 @@ export function Settings() {
   const previewSeq = parseInt(invForm.inventory_seq_start) || 1;
   const previewId = `${previewPrefix}-${year}-${String(previewSeq).padStart(6, '0')}`;
 
+
+
+  const sorted = sortItems(members, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'member') return item.user_id;
+    if (col === 'role') return item.role;
+    return null;
+  });
+
   return (
-    <div className="p-3 sm:p-6 max-w-[860px] space-y-5">
+    <div className="p-6 max-w-[860px] space-y-5">
       <div>
         <h2 className="text-gray-900">Settings</h2>
         <p className="text-[13px] text-gray-400 mt-0.5">Manage your organization, users, and preferences</p>
@@ -334,39 +1139,69 @@ export function Settings() {
             <Plus size={12} />Invite Member
           </button>
         }>
+
           {membersLoading ? (
             <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-10 bg-gray-50 rounded-lg animate-pulse" />)}</div>
           ) : membersError ? <ErrorState message={membersError} onRetry={reloadMembers} />
-          : members.length === 0 ? (
-            <p className="py-8 text-center text-[13px] text-gray-400">No team members yet.</p>
-          ) : (
-            <div className="divide-y divide-[rgba(0,0,0,0.05)]">
-              {members.map((m: any) => {
-                const isCurrentUser = m.user_id === user?.id;
-                const initials = m.user_id?.slice(0, 2).toUpperCase() ?? 'U?';
-                return (
-                  <div key={m.id} className="flex items-center gap-3 py-3">
-                    <div className="w-7 h-7 rounded-full bg-gray-900 flex items-center justify-center flex-shrink-0">
-                      <span className="text-white text-[10px] font-semibold">{initials}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium text-gray-900">{isCurrentUser ? 'You' : `Member ${m.user_id?.slice(0, 6)}`}</p>
-                      <p className="text-[11px] text-gray-400">Added {new Date(m.created_at).toLocaleDateString()}</p>
-                    </div>
-                    <select defaultValue={m.role} onChange={e => updateMemberRole(m.id, e.target.value)}
-                      className="text-[13px] text-gray-700 border border-[rgba(0,0,0,0.1)] rounded-lg px-2 py-1 focus:outline-none bg-white capitalize flex-shrink-0"
-                      disabled={isCurrentUser}>
-                      {ROLES.map(r => <option key={r} value={r} className="capitalize">{r}</option>)}
-                    </select>
-                    {!isCurrentUser && (
-                      <button onClick={() => removeMember(m.id, m.user_id)} className="text-gray-300 hover:text-red-400 p-1 rounded transition-colors flex-shrink-0">
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          : (
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[rgba(0,0,0,0.06)]">
+                  {([
+                    { label: 'Member', col: 'member' },
+                    { label: 'Role', col: 'role' },
+                    { label: '', col: '' },
+                  ] as const).map(({ label, col }) => (
+                    <th key={col} onClick={() => col && handleSort(col)}
+                      className={`text-left py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide pr-4 ${col ? 'cursor-pointer select-none hover:text-gray-600 transition-colors' : ''}`}>
+                      <span className="inline-flex items-center gap-1">
+                        {label}
+                        {col && sortCol === col
+                          ? <span className="text-[#3ECF8E]">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                          : col ? <span className="opacity-0">↕</span> : null}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {members.length === 0 ? (
+                  <tr><td colSpan={3} className="py-8 text-center text-[13px] text-gray-400">No team members yet.</td></tr>
+                ) : sorted.map((m: any, i: number) => {
+                  const isCurrentUser = m.user_id === user?.id;
+                  const initials = m.user_id?.slice(0, 2).toUpperCase() ?? 'U?';
+                  return (
+                    <tr key={m.id} className={`hover:bg-gray-50/60 ${i < sorted.length-1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
+                      <td className="py-3 pr-4">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-full bg-gray-900 flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-[10px] font-semibold">{initials}</span>
+                          </div>
+                          <div>
+                            <p className="text-[13px] font-medium text-gray-900">{isCurrentUser ? 'You' : `Member ${m.user_id?.slice(0, 6)}`}</p>
+                            <p className="text-[11px] text-gray-400">Added {new Date(m.created_at).toLocaleDateString()}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <select defaultValue={m.role} onChange={e => updateMemberRole(m.id, e.target.value)}
+                          className="text-[13px] text-gray-700 border border-[rgba(0,0,0,0.1)] rounded-lg px-2 py-1 focus:outline-none bg-white capitalize"
+                          disabled={isCurrentUser}>
+                          {ROLES.map(r => <option key={r} value={r} className="capitalize">{r}</option>)}
+                        </select>
+                      </td>
+                      <td className="py-3">
+                        {!isCurrentUser && (
+                          <button onClick={() => removeMember(m.id, m.user_id)} className="text-gray-300 hover:text-red-400 p-1 rounded transition-colors">
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </Section>
       )}
@@ -436,26 +1271,32 @@ export function Settings() {
             <Info size={13} className="flex-shrink-0 mt-px text-gray-400" />
             <span>Preferences are saved in this browser only. Server-side delivery configuration is not yet available.</span>
           </div>
-          <div className="divide-y divide-[rgba(0,0,0,0.05)]">
-            {NOTIF_DEFAULTS.map((n) => (
-              <div key={n.id} className="flex items-center justify-between py-3 gap-3">
-                <p className="text-[13px] text-gray-700 flex-1 min-w-0">{n.label}</p>
-                <div className="flex items-center gap-4 flex-shrink-0">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[rgba(0,0,0,0.06)]">
+                <th className="text-left py-2 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Event</th>
+                <th className="text-center py-2 px-4 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Email</th>
+                <th className="text-center py-2 px-4 text-[11px] font-medium text-gray-400 uppercase tracking-wide">Push</th>
+              </tr>
+            </thead>
+            <tbody>
+              {NOTIF_DEFAULTS.map((n, i) => (
+                <tr key={n.id} className={i < NOTIF_DEFAULTS.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}>
+                  <td className="py-3 text-[13px] text-gray-700">{n.label}</td>
                   {(['email', 'push'] as const).map(type => (
-                    <div key={type} className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">{type}</span>
+                    <td key={type} className="py-3 px-4 text-center">
                       <button
                         onClick={() => setNotifState(s => ({...s, [n.id]: {...s[n.id], [type]: !s[n.id]?.[type]}}))}
                         className={`w-9 h-5 rounded-full transition-colors relative inline-flex flex-shrink-0 ${notifState[n.id]?.[type] ? 'bg-[#3ECF8E]' : 'bg-gray-200'}`}
                       >
                         <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm ${notifState[n.id]?.[type] ? 'left-[18px]' : 'left-0.5'}`} />
                       </button>
-                    </div>
+                    </td>
                   ))}
-                </div>
-              </div>
-            ))}
-          </div>
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <div className="flex items-center justify-end gap-3 mt-5 pt-4 border-t border-[rgba(0,0,0,0.06)]">
             {notifSaved && <span className="text-[12px] text-[#3ECF8E]">Saved to browser</span>}
             <button onClick={saveNotifPrefs} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg transition-colors">
@@ -652,6 +1493,18 @@ export function Settings() {
       )}
 
       {/* Account */}
+      {view === 'product-presets' && (
+        <Section title="Product Presets">
+          <ProductPresetsView orgId={orgId} userId={user?.id} role={currentRole} />
+        </Section>
+      )}
+
+      {view === 'pricing-presets' && (
+        <Section title="Pricing Presets">
+          <PricingPresetsView orgId={orgId} role={currentRole} />
+        </Section>
+      )}
+
       {(view === 'account' || view === 'overview') && (
         <Section title="Account">
           <div className="space-y-3">

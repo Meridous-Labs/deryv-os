@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Search, Grid3X3, List, Plus, Loader2, MapPin, Tag, Printer, Copy, Check, X, ScanLine } from 'lucide-react';
+import { Search, Grid3X3, List, Plus, Loader2, MapPin, Tag, Printer, Copy, Check, X, ScanLine, Bookmark, ChevronDown } from 'lucide-react';
 import { useSearchParams } from 'react-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { useOrgQuery, insertRow, updateRow, deleteRow, countLinked, logActivity } from '../../lib/hooks';
@@ -15,6 +15,65 @@ import { FilterBar, FilterValues, FilterDef } from '../components/FilterBar';
 
 const INV_STATUSES = ['UNPROCESSED', 'TESTING', 'PHOTOGRAPHY', 'LISTING', 'ACTIVE', 'PICKED', 'PACKED', 'SHIPPED', 'DELIVERED', 'RETURNED', 'SCRAPPED', 'DAMAGED'];
 const GRADES = ['A+', 'A', 'B+', 'B', 'C+', 'C', 'F'];
+const CONDITIONS: { label: string; value: string }[] = [
+  { label: 'New',        value: 'NEW' },
+  { label: 'Like New',   value: 'LIKE_NEW' },
+  { label: 'Open Box',   value: 'OPEN_BOX' },
+  { label: 'Refurbished',value: 'REFURBISHED' },
+  { label: 'Good',       value: 'GOOD' },
+  { label: 'Fair',       value: 'FAIR' },
+  { label: 'Used',       value: 'USED' },
+  { label: 'Poor',       value: 'POOR' },
+  { label: 'Damaged',    value: 'DAMAGED' },
+  { label: 'Salvage',    value: 'SALVAGE' },
+  { label: 'Parts Only', value: 'PARTS' },
+];
+// Helper: DB value → display label
+function conditionLabel(val: string | null | undefined): string {
+  if (!val) return '';
+  return CONDITIONS.find(c => c.value === val)?.label ?? val.replace(/_/g, ' ').replace(/\w/g, c => c.toUpperCase());
+}
+
+// Pricing rules stored in localStorage: { [grade]: { mode: 'pct'|'add'|'sub', value: number } }
+// ── Pricing presets (org-wide from DB) ───────────────────────────────────────
+function applyPricingRule(msrp: number, rule: { mode: string; value: number | string } | null): number | null {
+  if (!rule || !rule.value || !msrp || msrp <= 0) return null;
+  const v = Number(rule.value); // coerce string from DB to number
+  if (!v || isNaN(v)) return null;
+  if (rule.mode === 'pct') return parseFloat((msrp * v / 100).toFixed(2));
+  if (rule.mode === 'add') return parseFloat((msrp + v).toFixed(2));
+  if (rule.mode === 'sub') return parseFloat(Math.max(0, msrp - v).toFixed(2));
+  return null;
+}
+function findPricingRule(
+  pricingPresets: any[],
+  grade: string,
+  condition: string
+): { rule: { mode: string; value: number } | null; source: string | null } {
+  if (!pricingPresets?.length) return { rule: null, source: null };
+  // Priority: grade+condition → grade only → condition only → default
+  const match = (g: string | null, c: string | null) =>
+    pricingPresets.find(p =>
+      (g ? p.grade === g : p.grade == null) &&
+      (c ? p.condition === c : p.condition == null) &&
+      (g == null && c == null ? p.is_default : true)
+    );
+  if (grade && condition) {
+    const r = match(grade, condition);
+    if (r) return { rule: r, source: `Grade ${grade} + ${conditionLabel(condition)}` };
+  }
+  if (grade) {
+    const r = match(grade, null);
+    if (r) return { rule: r, source: `Grade ${grade}` };
+  }
+  if (condition) {
+    const r = match(null, condition);
+    if (r) return { rule: r, source: conditionLabel(condition) };
+  }
+  const def = pricingPresets.find(p => p.is_default);
+  if (def) return { rule: def, source: 'Default rule' };
+  return { rule: null, source: null };
+}
 
 const INV_SELECT = 'id, inventory_id, sku, upc, serial_number, product_title, brand, category, model, condition, grade, status, msrp, current_asking_price, weighted_acquisition_cost, component_cost, supply_cost, shipping_cost, marketplace_fees, warehouse_location_id, lot_id, notes, created_at, barcode_value, label_generated_at, weight_oz, length_in, width_in, height_in, warehouse_locations(location_code, zone, rack, shelf, bin), lots(lot_id)';
 
@@ -29,6 +88,11 @@ function locationLabel(loc: any): string {
   return loc.location_code ?? ([loc.zone, loc.rack, loc.shelf, loc.bin].filter(Boolean).join('-') || '—');
 }
 
+function normalizeLabel(val: string | null | undefined): string {
+  if (!val) return '';
+  return val.replace(/_/g, ' ').replace(/\w/g, c => c.toUpperCase());
+}
+
 function lotLabel(item: any): string {
   const humanId = item.lots?.lot_id;
   if (humanId) return `#${humanId.toUpperCase()}`;
@@ -40,21 +104,162 @@ function qrUrlFor(item: any): string {
   return `${window.location.origin}/inventory/all?selected=${item.id}`;
 }
 
-function AddInventoryModal({ open, onClose, orgId, userId, lots, locations, onCreated }: any) {
+
+// ── Save Preset Modal (from drawer) ───────────────────────────────────────────
+function SavePresetModal({ item, orgId, existingPreset, onClose, onSaved }: any) {
   const [form, setForm] = useState({
-    product_title: '', sku: '', upc: '', serial_number: '', brand: '', model: '', category: '',
-    condition: '', grade: 'B', current_asking_price: '', weighted_acquisition_cost: '',
-    status: 'UNPROCESSED', lot_id: '', warehouse_location_id: '', notes: '',
+    weight_oz: item.weight_oz != null ? String(item.weight_oz) : existingPreset?.weight_oz != null ? String(existingPreset.weight_oz) : '',
+    length_in: item.length_in != null ? String(item.length_in) : existingPreset?.length_in != null ? String(existingPreset.length_in) : '',
+    width_in: item.width_in != null ? String(item.width_in) : existingPreset?.width_in != null ? String(existingPreset.width_in) : '',
+    height_in: item.height_in != null ? String(item.height_in) : existingPreset?.height_in != null ? String(existingPreset.height_in) : '',
+    notes: existingPreset?.notes ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const reset = () => setForm({
-    product_title: '', sku: '', upc: '', serial_number: '', brand: '', model: '', category: '',
-    condition: '', grade: 'B', current_asking_price: '', weighted_acquisition_cost: '',
-    status: 'UNPROCESSED', lot_id: '', warehouse_location_id: '', notes: '',
-  });
+  const save = async () => {
+    setSaving(true); setError(null);
+    try {
+      const payload = {
+        organization_id: orgId,
+        brand: item.brand,
+        model: item.model,
+        product_title: item.product_title || null,
+        category: item.category || null,
+        msrp: item.msrp != null ? Number(item.msrp) : null,
+        weight_oz: parseFloat(form.weight_oz) || null,
+        length_in: parseFloat(form.length_in) || null,
+        width_in: parseFloat(form.width_in) || null,
+        height_in: parseFloat(form.height_in) || null,
+        notes: form.notes.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+      if (existingPreset?.id) {
+        const { error: err } = await supabase.from('product_presets').update(payload).eq('id', existingPreset.id);
+        if (err) throw new Error(err.message);
+      } else {
+        const { error: err } = await supabase.from('product_presets').insert(payload);
+        if (err) throw new Error(err.message);
+      }
+      onSaved();
+    } catch (e: any) { setError(e.message); setSaving(false); }
+  };
+  return (
+    <Modal open={open} onClose={onClose} title={existingPreset?.id ? 'Update Preset' : 'Save as Preset'}
+      footer={<>
+        <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
+        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+          {saving && <Loader2 size={12} className="animate-spin" />}{existingPreset?.id ? 'Update' : 'Save'} Preset
+        </button>
+      </>}>
+      <div className="space-y-3">
+        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+        <p className="text-[12px] text-gray-500">Saves physical specs for <strong>{item.brand} {item.model}</strong> as a reusable preset.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Weight (oz)</label>
+            <input type="number" className="w-full px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none" value={form.weight_oz} onChange={e => set('weight_oz', e.target.value)} placeholder="16.0" min="0" step="0.1" /></div>
+          <div><label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Length (in)</label>
+            <input type="number" className="w-full px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none" value={form.length_in} onChange={e => set('length_in', e.target.value)} placeholder="12.0" min="0" step="0.1" /></div>
+          <div><label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Width (in)</label>
+            <input type="number" className="w-full px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none" value={form.width_in} onChange={e => set('width_in', e.target.value)} placeholder="8.0" min="0" step="0.1" /></div>
+          <div><label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Height (in)</label>
+            <input type="number" className="w-full px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none" value={form.height_in} onChange={e => set('height_in', e.target.value)} placeholder="4.0" min="0" step="0.1" /></div>
+        </div>
+        <div><label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1 block">Notes</label>
+          <textarea className="w-full px-3 py-2 text-[13px] border border-[rgba(0,0,0,0.1)] rounded-lg focus:outline-none resize-none" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} /></div>
+      </div>
+    </Modal>
+  );
+}
+
+function AddInventoryModal({ open, onClose, orgId, userId, lots, locations, onCreated, distinctBrands = [], distinctCategories = [], presets = [], pricingPresets = [] }: any) {
+
+  const reset = () => { setForm(emptyForm); setWacSource(null); setAskSource(null); setPresetApplied(null); };
+
+  // ── WAC calculation ──────────────────────────────────────────────────────
+  const calcWac = async (lotId: string, msrpStr: string) => {
+    if (!lotId) { setWacSource(null); return; }
+    const lot = (lots ?? []).find((l: any) => l.id === lotId);
+    if (!lot) { setWacSource(null); return; }
+    const landedCost = lot.manual_landed_cost_override != null
+      ? Number(lot.manual_landed_cost_override)
+      : (Number(lot.purchase_price || 0) + Number(lot.freight_cost || 0) + Number(lot.handling_cost || 0));
+    if (landedCost <= 0) { setWacSource(null); return; }
+    const msrp = parseFloat(msrpStr);
+    const lotTotalMsrp = Number(lot.total_msrp || 0);
+    if (!isNaN(msrp) && msrp > 0 && lotTotalMsrp > 0) {
+      const wac = parseFloat(((msrp / lotTotalMsrp) * landedCost).toFixed(2));
+      setForm(f => ({ ...f, weighted_acquisition_cost: String(wac) }));
+      setWacSource('MSRP-weighted');
+      return;
+    }
+    setCalcingWac(true);
+    try {
+      const { count } = await supabase
+        .from('inventory_items').select('id', { count: 'exact', head: true })
+        .eq('organization_id', orgId).eq('lot_id', lotId);
+      const wac = parseFloat((landedCost / ((count ?? 0) + 1)).toFixed(2));
+      setForm(f => ({ ...f, weighted_acquisition_cost: String(wac) }));
+      setWacSource('LOT average');
+    } catch { setWacSource(null); }
+    setCalcingWac(false);
+  };
+
+  // ── Asking price calculation ─────────────────────────────────────────────
+  const calcAsk = (msrpStr: string, grade: string, condition: string) => {
+    const msrp = parseFloat(msrpStr);
+    if (!msrp || msrp <= 0) { setAskSource(null); return; }
+    const { rule, source } = findPricingRule(pricingPresets, grade, condition);
+    const price = applyPricingRule(msrp, rule);
+    if (price !== null) {
+      setForm(f => ({ ...f, current_asking_price: String(price) }));
+      if (rule?.mode === 'pct') setAskSource(`${rule.value}% of MSRP${source ? ` (${source})` : ''}`);
+      else if (rule?.mode === 'add') setAskSource(`MSRP + $${rule.value}${source ? ` (${source})` : ''}`);
+      else if (rule?.mode === 'sub') setAskSource(`MSRP − $${rule.value}${source ? ` (${source})` : ''}`);
+    } else { setAskSource(null); }
+  };
+
+  const handleLotChange = (lotId: string) => {
+    set('lot_id', lotId);
+    void calcWac(lotId, form.msrp);
+  };
+  const handleMsrpChange = (v: string) => {
+    set('msrp', v);
+    calcAsk(v, form.grade, form.condition);
+    void calcWac(form.lot_id, v);
+  };
+  const handleGradeChange = (v: string) => {
+    set('grade', v);
+    calcAsk(form.msrp, v, form.condition);
+  };
+  const handleConditionChange = (v: string) => {
+    set('condition', v);
+    calcAsk(form.msrp, form.grade, v);
+  };
+
+  const applyPreset = (brand: string, model: string) => {
+    const preset = presets.find((p: any) =>
+      p.brand?.toLowerCase() === brand?.toLowerCase() &&
+      p.model?.toLowerCase() === model?.toLowerCase()
+    );
+    if (!preset) return;
+    setForm(f => ({
+      ...f,
+      product_title: preset.product_title || f.product_title,
+      brand: preset.brand || f.brand,
+      model: preset.model || f.model,
+      category: preset.category || f.category,
+      msrp: preset.msrp != null ? String(preset.msrp) : f.msrp,
+      weight_oz: preset.weight_oz != null ? String(preset.weight_oz) : f.weight_oz ?? '',
+      length_in: preset.length_in != null ? String(preset.length_in) : f.length_in ?? '',
+      width_in: preset.width_in != null ? String(preset.width_in) : f.width_in ?? '',
+      height_in: preset.height_in != null ? String(preset.height_in) : f.height_in ?? '',
+    }));
+    // Recalculate asking price with preset MSRP
+    if (preset.msrp) calcAsk(String(preset.msrp), form.grade, form.condition);
+    setPresetApplied(`${preset.brand} ${preset.model}`);
+  };
 
   const save = async () => {
     if (!form.product_title) { setError('Title is required.'); return; }
@@ -63,25 +268,32 @@ function AddInventoryModal({ open, onClose, orgId, userId, lots, locations, onCr
     const { error: err } = await insertRow('inventory_items', {
       organization_id: orgId,
       product_title: form.product_title,
-      sku: form.sku || null,
-      upc: form.upc || null,
+      sku: form.sku || null, upc: form.upc || null,
       serial_number: form.serial_number || null,
-      brand: form.brand || null,
-      model: form.model || null,
-      category: form.category || null,
+      brand: form.brand || null, model: form.model || null, category: form.category ? normalizeLabel(form.category) : null,
       condition: form.condition || null,
       grade: form.grade || null,
+      msrp: parseFloat(form.msrp) || null,
       current_asking_price: parseFloat(form.current_asking_price) || 0,
       weighted_acquisition_cost: parseFloat(form.weighted_acquisition_cost) || 0,
-      status: form.status,
+      status: form.status.toUpperCase().replace(/ /g, '_'),
       lot_id: form.lot_id || null,
       warehouse_location_id: form.warehouse_location_id || null,
       notes: form.notes || null,
+      weight_oz: parseFloat((form as any).weight_oz) || null,
+      length_in: parseFloat((form as any).length_in) || null,
+      width_in: parseFloat((form as any).width_in) || null,
+      height_in: parseFloat((form as any).height_in) || null,
     });
     if (err) { setError(err); setSaving(false); return; }
     await logActivity(orgId, userId, `Inventory item "${form.product_title}" added`, 'inventory_items');
     setSaving(false); onCreated(); onClose(); reset();
   };
+
+  const statusOptions = [
+    'Unprocessed', 'Testing', 'Photography', 'Listing', 'Active',
+    'Picked', 'Packed', 'Shipped', 'Delivered', 'Returned', 'Scrapped', 'Damaged',
+  ];
 
   return (
     <Modal open={open} onClose={onClose} title="Add Inventory Item" width="max-w-2xl"
@@ -93,42 +305,49 @@ function AddInventoryModal({ open, onClose, orgId, userId, lots, locations, onCr
       </>}>
       <div className="space-y-4">
         {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+        {presetApplied && (
+          <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#BBF7D0] rounded-lg px-3 py-2">
+            <p className="text-[12px] text-[#15803d]"><span className="font-medium">Preset applied:</span> {presetApplied} — weight and dimensions auto-filled.</p>
+            <button onClick={() => setPresetApplied(null)} className="text-[#16a34a] hover:text-[#15803d]"><X size={12} /></button>
+          </div>
+        )}
+
+        {/* Identity */}
         <FormField label="Product Title" required>
-          <input className={inputCls} value={form.product_title} onChange={e => set('product_title', e.target.value)} placeholder="Apple iPhone 15 Pro 128GB" />
+          <input className={inputCls} value={form.product_title} onChange={e => {
+            set('product_title', e.target.value);
+            // Auto-match preset from title
+            const t = e.target.value.toLowerCase();
+            const match = (presets ?? []).find((p: any) => {
+              const pb = p.brand.toLowerCase(); const pm = p.model.toLowerCase();
+              return pb && pm && t.includes(pb) && t.includes(pm);
+            });
+            if (match) applyPreset(match.brand, match.model);
+          }} placeholder="Apple iPhone 15 Pro 128GB" />
         </FormField>
+        <div className="grid grid-cols-3 gap-4">
+          <FormField label="Brand">
+            <input list="brand-list" className={inputCls} value={form.brand} onChange={e => { set('brand', e.target.value); applyPreset(e.target.value, form.model); }} placeholder="Apple" />
+            <datalist id="brand-list">{distinctBrands.map((b: string) => <option key={b} value={b} />)}</datalist>
+          </FormField>
+          <FormField label="Model">
+            <input className={inputCls} value={form.model} onChange={e => { set('model', e.target.value); applyPreset(form.brand, e.target.value); }} placeholder="iPhone 15 Pro" />
+          </FormField>
+          <FormField label="Category">
+            <input list="cat-list" className={inputCls} value={form.category} onChange={e => set('category', e.target.value)} placeholder="Electronics" />
+            <datalist id="cat-list">{(distinctCategories ?? []).map((c: string) => <option key={c} value={c} />)}</datalist>
+          </FormField>
+        </div>
         <div className="grid grid-cols-3 gap-4">
           <FormField label="SKU"><input className={inputCls} value={form.sku} onChange={e => set('sku', e.target.value)} placeholder="SKU-001" /></FormField>
           <FormField label="UPC"><input className={inputCls} value={form.upc} onChange={e => set('upc', e.target.value)} placeholder="012345678901" /></FormField>
-          <FormField label="Serial Number"><input className={inputCls} value={form.serial_number} onChange={e => set('serial_number', e.target.value)} placeholder="SN123456" /></FormField>
+          <FormField label="Serial #"><input className={inputCls} value={form.serial_number} onChange={e => set('serial_number', e.target.value)} placeholder="SN123456" /></FormField>
         </div>
-        <div className="grid grid-cols-3 gap-4">
-          <FormField label="Brand"><input className={inputCls} value={form.brand} onChange={e => set('brand', e.target.value)} placeholder="Apple" /></FormField>
-          <FormField label="Model"><input className={inputCls} value={form.model} onChange={e => set('model', e.target.value)} placeholder="iPhone 15 Pro" /></FormField>
-          <FormField label="Category"><input className={inputCls} value={form.category} onChange={e => set('category', e.target.value)} placeholder="Smartphones" /></FormField>
-        </div>
-        <div className="grid grid-cols-3 gap-4">
-          <FormField label="Grade">
-            <select className={selectCls} value={form.grade} onChange={e => set('grade', e.target.value)}>
-              {GRADES.map(g => <option key={g}>{g}</option>)}
-            </select>
-          </FormField>
-          <FormField label="Status">
-            <select className={selectCls} value={form.status} onChange={e => set('status', e.target.value)}>
-              {INV_STATUSES.map(s => <option key={s}>{s}</option>)}
-            </select>
-          </FormField>
-          <FormField label="Asking Price ($)">
-            <input type="number" className={inputCls} value={form.current_asking_price} onChange={e => set('current_asking_price', e.target.value)} placeholder="0.00" min="0" step="0.01" />
-          </FormField>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <FormField label="Acquisition Cost ($)">
-            <input type="number" className={inputCls} value={form.weighted_acquisition_cost} onChange={e => set('weighted_acquisition_cost', e.target.value)} placeholder="0.00" min="0" step="0.01" />
-          </FormField>
-        </div>
+
+        {/* LOT + Location */}
         <div className="grid grid-cols-2 gap-4">
           <FormField label="LOT" required>
-            <select className={selectCls} value={form.lot_id} onChange={e => set('lot_id', e.target.value)}>
+            <select className={selectCls} value={form.lot_id} onChange={e => handleLotChange(e.target.value)}>
               <option value="">— Select LOT —</option>
               {(lots ?? []).map((l: any) => <option key={l.id} value={l.id}>#{l.lot_id ? l.lot_id.toUpperCase() : l.id.slice(0, 8).toUpperCase()}</option>)}
             </select>
@@ -140,12 +359,66 @@ function AddInventoryModal({ open, onClose, orgId, userId, lots, locations, onCr
             </select>
           </FormField>
         </div>
-        <FormField label="Condition Description">
-          <textarea className={textareaCls} rows={2} value={form.condition} onChange={e => set('condition', e.target.value)} placeholder="Describe the physical condition..." />
-        </FormField>
+
+        {/* Condition + Grade + Status */}
+        <div className="grid grid-cols-3 gap-4">
+          <FormField label="Condition">
+            <select className={selectCls} value={form.condition} onChange={e => handleConditionChange(e.target.value)}>
+              <option value="">— Select —</option>
+              {CONDITIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </FormField>
+          <FormField label="Grade">
+            <select className={selectCls} value={form.grade} onChange={e => handleGradeChange(e.target.value)}>
+              <option value="">— Select —</option>
+              {GRADES.map(g => <option key={g}>{g}</option>)}
+            </select>
+          </FormField>
+          <FormField label="Status">
+            <select className={selectCls} value={form.status} onChange={e => set('status', e.target.value)}>
+              {statusOptions.map(s => <option key={s}>{s}</option>)}
+            </select>
+          </FormField>
+        </div>
+
+        {/* Pricing row */}
+        <div className="grid grid-cols-3 gap-4">
+          <FormField label="MSRP ($)">
+            <input type="number" className={inputCls} value={form.msrp} onChange={e => handleMsrpChange(e.target.value)} placeholder="0.00" min="0" step="0.01" />
+          </FormField>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Asking Price ($)</label>
+              {askSource && <span className="text-[10px] text-[#3ECF8E] font-medium">{askSource}</span>}
+            </div>
+            <input type="number" className={inputCls} value={form.current_asking_price}
+              onChange={e => { set('current_asking_price', e.target.value); setAskSource(null); }}
+              placeholder="0.00" min="0" step="0.01" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Acquisition Cost ($)</label>
+              {calcingWac && <span className="text-[10px] text-gray-400">calculating…</span>}
+              {!calcingWac && wacSource && <span className="text-[10px] text-[#3ECF8E] font-medium">{wacSource}</span>}
+            </div>
+            <input type="number" className={inputCls} value={form.weighted_acquisition_cost}
+              onChange={e => { set('weighted_acquisition_cost', e.target.value); setWacSource(null); }}
+              placeholder="0.00" min="0" step="0.01" />
+          </div>
+        </div>
+
         <FormField label="Notes">
           <textarea className={textareaCls} rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Internal notes..." />
         </FormField>
+        <div>
+          <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-2 block">Weight &amp; Dimensions <span className="text-gray-300 normal-case">(auto-fills from preset)</span></label>
+          <div className="grid grid-cols-4 gap-3">
+            <FormField label="Weight (oz)"><input type="number" className={inputCls} value={(form as any).weight_oz ?? ''} onChange={e => set('weight_oz', e.target.value)} placeholder="16" min="0" step="0.1" /></FormField>
+            <FormField label="Length (in)"><input type="number" className={inputCls} value={(form as any).length_in ?? ''} onChange={e => set('length_in', e.target.value)} placeholder="12" min="0" step="0.1" /></FormField>
+            <FormField label="Width (in)"><input type="number" className={inputCls} value={(form as any).width_in ?? ''} onChange={e => set('width_in', e.target.value)} placeholder="8" min="0" step="0.1" /></FormField>
+            <FormField label="Height (in)"><input type="number" className={inputCls} value={(form as any).height_in ?? ''} onChange={e => set('height_in', e.target.value)} placeholder="4" min="0" step="0.1" /></FormField>
+          </div>
+        </div>
       </div>
     </Modal>
   );
@@ -158,6 +431,20 @@ const conditionColor = (grade: string) => {
   return 'bg-amber-50 text-amber-700';
 };
 
+
+// ── Sort helper ────────────────────────────────────────────────────────────────
+function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal: (item: any, col: string) => any): any[] {
+  if (!col) return items;
+  return [...items].sort((a, b) => {
+    const av = getVal(a, col);
+    const bv = getVal(b, col);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
+    return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
+}
 export function Inventory() {
   const view = useSecondaryView();
   const { orgId, user, currentRole: role, currentOrg } = useAuth();
@@ -165,6 +452,48 @@ export function Inventory() {
   const [filterValues, setFilterValues] = useState<FilterValues>({});
   const [gridMode, setGridMode] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const _sortInit = (() => { try { return JSON.parse(localStorage.getItem('deryv.sort.inventory') ?? 'null') ?? {}; } catch { return {}; } })();
+  const [sortCol, setSortCol] = useState<string | null>(_sortInit.col ?? null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_sortInit.dir ?? 'asc');
+
+  const handleSort = (col: string) => {
+    const next = sortCol === col ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc';
+    const nextCol = col;
+    setSortCol(nextCol);
+    setSortDir(next as 'asc' | 'desc');
+    localStorage.setItem('deryv.sort.inventory', JSON.stringify({ col: nextCol, dir: next }));
+  };
+  const [showSavePreset, setShowSavePreset] = useState(false);
+  const [showApplyPreset, setShowApplyPreset] = useState(false);
+
+  const applyPresetToItem = async (preset: any) => {
+    if (!selected) return;
+    setShowApplyPreset(false);
+    // Update weight/dims on the item
+    const updates: any = {};
+    if (preset.weight_oz != null) updates.weight_oz = preset.weight_oz;
+    if (preset.length_in != null) updates.length_in = preset.length_in;
+    if (preset.width_in != null) updates.width_in = preset.width_in;
+    if (preset.height_in != null) updates.height_in = preset.height_in;
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('inventory_items').update(updates).eq('id', selected.id);
+    }
+    // Create supply transactions
+    if (preset.preset_supplies?.length) {
+      const txns = preset.preset_supplies.map((ps: any) => ({
+        organization_id: orgId,
+        supply_id: ps.supply_id,
+        transaction_type: 'USE',
+        quantity: -Math.abs(ps.quantity),
+        unit_cost: ps.supplies?.unit_cost ?? null,
+        total_cost: ps.supplies?.unit_cost != null ? parseFloat((ps.supplies.unit_cost * ps.quantity).toFixed(2)) : null,
+        inventory_item_id: selected.id,
+        notes: 'Applied from product preset',
+      }));
+      await supabase.from('supply_transactions').insert(txns);
+    }
+    await reload();
+  };
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -210,7 +539,9 @@ export function Inventory() {
     filterKey: statusFilter ?? 'all',
   });
 
-  const { data: lots } = useOrgQuery<any>('lots', orgId, { select: 'id, lot_id, status, vendor_id, funding_partner_id' });
+  const { data: lots } = useOrgQuery<any>('lots', orgId, { select: 'id, lot_id, status, vendor_id, funding_partner_id, purchase_price, freight_cost, handling_cost, manual_landed_cost_override, total_msrp' });
+  const { data: presets } = useOrgQuery<any>('product_presets', orgId, { select: '*, preset_supplies(supply_id, quantity, supplies(id, name, unit_cost))' });
+  const { data: pricingPresets } = useOrgQuery<any>('pricing_presets', orgId, { select: '*' });
   const { data: locations } = useOrgQuery<any>('warehouse_locations', orgId, { select: 'id, location_code, zone, rack, shelf, bin' });
   const { data: vendors } = useOrgQuery<any>('vendors', orgId, { select: 'id, name' });
   const { data: partners } = useOrgQuery<any>('partners', orgId, { select: 'id, company_name' });
@@ -220,7 +551,7 @@ export function Inventory() {
   });
 
   const distinctBrands = Array.from(new Set(items.map((i: any) => i.brand).filter(Boolean))).sort() as string[];
-  const distinctCategories = Array.from(new Set(items.map((i: any) => i.category).filter(Boolean))).sort() as string[];
+  const distinctCategories = Array.from(new Set(items.map((i: any) => i.category ? normalizeLabel(i.category) : null).filter(Boolean))).sort() as string[];
 
   const invFilterDefs: FilterDef[] = [
     { type: 'select', key: 'lot_id', label: 'LOT', options: lots.map((l: any) => ({ value: l.id, label: `#${l.lot_id ? l.lot_id.toUpperCase() : l.id.slice(0, 8).toUpperCase()}` })) },
@@ -276,6 +607,8 @@ export function Inventory() {
     return true;
   });
 
+  // Sort filtered results
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -283,6 +616,18 @@ export function Inventory() {
       return next;
     });
   };
+  const sorted = sortItems(filtered, sortCol, sortDir, (item: any, col: string) => {
+    if (col === 'sku') return item.sku;
+    if (col === 'title') return item.product_title;
+    if (col === 'brand') return item.brand;
+    if (col === 'grade') return item.grade;
+    if (col === 'status') return item.status;
+    if (col === 'price') return Number(item.current_asking_price ?? 0);
+    if (col === 'location') return item.warehouse_locations?.location_code;
+    if (col === 'lot') return item.lots?.lot_id ?? item.lot_id;
+    return null;
+  });
+
   const allSelected = filtered.length > 0 && filtered.every((i: any) => selectedIds.has(i.id));
   const toggleSelectAll = () => {
     if (allSelected) {
@@ -359,7 +704,15 @@ export function Inventory() {
     setDrawerError(null);
   };
 
-  const setEF = (k: string, v: string) => setEditForm((f: any) => ({ ...f, [k]: v }));
+  const setEF = (k: string, v: any) => setEditForm((f: any) => ({ ...f, [k]: v }));
+
+  const calcEditAsk = (msrpStr: string, grade: string, condition: string) => {
+    const msrp = parseFloat(msrpStr);
+    if (!msrp || msrp <= 0) return;
+    const { rule } = findPricingRule(pricingPresets ?? [], grade, condition);
+    const price = applyPricingRule(msrp, rule);
+    if (price !== null) setEditForm((f: any) => ({ ...f, current_asking_price: String(price) }));
+  };
 
   const saveEdit = async () => {
     if (!editForm.product_title) { setDrawerError('Title is required.'); return; }
@@ -370,7 +723,7 @@ export function Inventory() {
       upc: editForm.upc || null,
       serial_number: editForm.serial_number || null,
       brand: editForm.brand || null,
-      category: editForm.category || null,
+      category: editForm.category ? normalizeLabel(editForm.category) : null,
       model: editForm.model || null,
       condition: editForm.condition || null,
       grade: editForm.grade || null,
@@ -569,6 +922,20 @@ export function Inventory() {
           <button onClick={() => { setLabelItem(selected); setLabelCopied(false); }} className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-gray-700 rounded-lg hover:bg-gray-50">
             <Tag size={12} />Generate Label
           </button>
+          {canEditOps(role) && (() => {
+            const hasPresetData = !!(selected?.brand && selected?.model);
+            return (
+              <button
+                onClick={() => hasPresetData && setShowSavePreset(true)}
+                disabled={!hasPresetData}
+                title={!hasPresetData ? 'Requires Brand and Model to save a preset' : 'Save physical specs as a reusable preset'}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium border rounded-lg transition-colors ${hasPresetData ? 'border-[rgba(0,0,0,0.1)] text-gray-700 hover:bg-gray-50' : 'border-[rgba(0,0,0,0.06)] text-gray-300 cursor-not-allowed'}`}
+              >
+                <Bookmark size={12} />Save as Preset
+                {!hasPresetData && <span className="text-[10px] text-gray-300 ml-0.5">(needs brand + model)</span>}
+              </button>
+            );
+          })()}
           {canEditOps(role) && (
             <button onClick={() => setConfirm({ type: 'scrapped' })} className="px-3 py-1.5 text-[13px] font-medium border border-[rgba(0,0,0,0.1)] text-amber-700 rounded-lg hover:bg-amber-50">Mark Scrapped</button>
           )}
@@ -667,7 +1034,7 @@ export function Inventory() {
   const scaledH = Math.round(labelNativeH * previewScale);
 
   return (
-    <div className="p-3 sm:p-6 max-w-[1400px] space-y-4">
+    <div className="p-6 max-w-[1400px] space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-gray-900">Inventory</h2>
@@ -688,7 +1055,7 @@ export function Inventory() {
       )}
 
       <div className="bg-white rounded-xl border border-[rgba(0,0,0,0.07)] overflow-hidden">
-        <div className="px-3 sm:px-4 py-3 border-b border-[rgba(0,0,0,0.06)] flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="px-4 py-3 border-b border-[rgba(0,0,0,0.06)] flex items-center gap-3">
           <div className="relative flex-1 max-w-xs">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by title or SKU..."
@@ -729,7 +1096,7 @@ export function Inventory() {
           <EmptyState title="No inventory items" description={search ? 'Try a different search.' : 'Add your first inventory item.'} action={!search && canEditOps(role) ? { label: 'Add Item', onClick: () => setShowAdd(true) } : undefined} />
         ) : gridMode ? (
           <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {filtered.map((item: any) => (
+            {sorted.map((item: any) => (
               <div key={item.id ?? item.inventory_id} onClick={() => openItem(item)} className="border border-[rgba(0,0,0,0.07)] rounded-xl p-3 hover:border-[rgba(0,0,0,0.15)] transition-colors cursor-pointer">
                 <div className="flex items-start justify-between mb-2">
                   <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>Grade {item.grade ?? '?'}</span>
@@ -742,71 +1109,43 @@ export function Inventory() {
             ))}
           </div>
         ) : (
-          <>
-            {/* Mobile card list */}
-            <div className="sm:hidden divide-y divide-[rgba(0,0,0,0.05)]">
-              {filtered.map((item: any) => (
-                <div key={item.id ?? item.inventory_id} onClick={() => openItem(item)}
-                  className="flex items-center gap-3 px-3 py-3 hover:bg-gray-50 active:bg-gray-100 cursor-pointer">
-                  <input type="checkbox" checked={selectedIds.has(item.id)}
-                    onChange={e => { e.stopPropagation(); toggleSelect(item.id); }}
-                    onClick={e => e.stopPropagation()}
-                    className="w-3.5 h-3.5 accent-gray-800 cursor-pointer flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-medium text-gray-900 truncate">{item.product_title}</p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">{[item.brand, item.sku].filter(Boolean).join(' · ') || '—'}</p>
-                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      <StatusBadge status={item.status} size="sm" />
-                      {item.grade && <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>Grade {item.grade}</span>}
-                      <span className="text-[11px] font-mono text-gray-400">{locationLabel(item.warehouse_locations)}</span>
-                    </div>
-                  </div>
-                  <div className="flex-shrink-0 text-right">
-                    <p className="text-[14px] font-semibold text-gray-900">${Number(item.current_asking_price || 0).toFixed(0)}</p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">{lotLabel(item)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {/* Desktop table */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-[rgba(0,0,0,0.06)]">
-                    <th className="pl-4 pr-2 py-2.5 w-8">
-                      <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
-                    </th>
-                    {['SKU', 'Title', 'Brand', 'Grade', 'Status', 'Asking Price', 'Location', 'LOT'].map(h => (
-                      <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((item: any, i: number) => (
-                    <tr key={item.id ?? item.inventory_id} className={`hover:bg-gray-50/70 ${i < filtered.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
-                      <td className="pl-4 pr-2 py-3 w-8" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
-                      </td>
-                      <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{item.sku ?? '—'}</td>
-                      <td className="px-5 py-3 text-[13px] font-medium text-gray-900 max-w-[240px] truncate cursor-pointer" onClick={() => openItem(item)}>{item.product_title}</td>
-                      <td className="px-5 py-3 text-[13px] text-gray-600 cursor-pointer" onClick={() => openItem(item)}>{item.brand ?? '—'}</td>
-                      <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}>
-                        <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>{item.grade ? `Grade ${item.grade}` : '—'}</span>
-                      </td>
-                      <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}><StatusBadge status={item.status} size="sm" /></td>
-                      <td className="px-5 py-3 text-[13px] text-gray-700 tabular-nums cursor-pointer" onClick={() => openItem(item)}>${Number(item.current_asking_price || 0).toFixed(0)}</td>
-                      <td className="px-5 py-3 text-[11px] font-mono text-gray-400 whitespace-nowrap cursor-pointer" onClick={() => openItem(item)}>{locationLabel(item.warehouse_locations)}</td>
-                      <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{lotLabel(item)}</td>
-                    </tr>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[rgba(0,0,0,0.06)]">
+                  <th className="pl-4 pr-2 py-2.5 w-8">
+                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
+                  </th>
+                  {['SKU', 'Title', 'Brand', 'Grade', 'Status', 'Asking Price', 'Location', 'LOT'].map(h => (
+                    <th key={h} className="text-left px-5 py-2.5 text-[11px] font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((item: any, i: number) => (
+                  <tr key={item.id ?? item.inventory_id} className={`hover:bg-gray-50/70 ${i < sorted.length - 1 ? 'border-b border-[rgba(0,0,0,0.04)]' : ''}`}>
+                    <td className="pl-4 pr-2 py-3 w-8" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="w-3.5 h-3.5 accent-gray-800 cursor-pointer" />
+                    </td>
+                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{item.sku ?? '—'}</td>
+                    <td className="px-5 py-3 text-[13px] font-medium text-gray-900 max-w-[240px] truncate cursor-pointer" onClick={() => openItem(item)}>{item.product_title}</td>
+                    <td className="px-5 py-3 text-[13px] text-gray-600 cursor-pointer" onClick={() => openItem(item)}>{item.brand ?? '—'}</td>
+                    <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}>
+                      <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${conditionColor(item.grade)}`}>{item.grade ? `Grade ${item.grade}` : '—'}</span>
+                    </td>
+                    <td className="px-5 py-3 cursor-pointer" onClick={() => openItem(item)}><StatusBadge status={item.status} size="sm" /></td>
+                    <td className="px-5 py-3 text-[13px] text-gray-700 tabular-nums cursor-pointer" onClick={() => openItem(item)}>${Number(item.current_asking_price || 0).toFixed(0)}</td>
+                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 whitespace-nowrap cursor-pointer" onClick={() => openItem(item)}>{locationLabel(item.warehouse_locations)}</td>
+                    <td className="px-5 py-3 text-[11px] font-mono text-gray-400 cursor-pointer" onClick={() => openItem(item)}>{lotLabel(item)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
-      <AddInventoryModal open={showAdd} onClose={() => setShowAdd(false)} orgId={orgId} userId={user?.id} lots={lots} locations={locations} onCreated={reload} />
+      <AddInventoryModal open={showAdd} onClose={() => setShowAdd(false)} orgId={orgId} userId={user?.id} lots={lots} locations={locations} onCreated={reload} distinctBrands={distinctBrands} distinctCategories={distinctCategories} presets={presets ?? []} pricingPresets={pricingPresets ?? []} />
 
       <Drawer open={!!selected} onClose={closeDrawer} title={selected?.product_title ?? ''} subtitle={drawerSubtitle} footer={drawerFooter}>
         {selected && (
@@ -832,6 +1171,53 @@ export function Inventory() {
             )}
             {editing ? (
               <div className="space-y-3">
+                {/* Apply Preset — fills form fields, saved with Save button */}
+                {presets && presets.length > 0 && (() => {
+                  const matched = presets.find((p: any) => {
+                    const t = (editForm.product_title || selected?.product_title || '').toLowerCase();
+                    const b = (p.brand || '').toLowerCase();
+                    const m = (p.model || '').toLowerCase();
+                    return (b && t.includes(b)) && (m && t.includes(m));
+                  });
+                                    return (
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowApplyPreset(v => !v)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50 text-gray-600 w-full justify-between"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Bookmark size={11} />
+                          {matched ? `Preset matched: ${matched.brand} ${matched.model}` : 'Apply Preset'}
+                        </span>
+                        <ChevronDown size={11} className={showApplyPreset ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                      </button>
+                      {showApplyPreset && (
+                        <div className="absolute left-0 top-full mt-1 bg-white border border-[rgba(0,0,0,0.09)] rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] z-50 w-full py-1 max-h-48 overflow-y-auto">
+                          {presets.map((p: any) => (
+                            <button key={p.id} onClick={() => {
+                              if (p.product_title) setEF('product_title', p.product_title);
+                              if (p.brand) setEF('brand', p.brand);
+                              if (p.model) setEF('model', p.model);
+                              if (p.category) setEF('category', p.category);
+                              if (p.msrp != null) setEF('msrp', String(p.msrp));
+                              if (p.weight_oz != null) setEF('weight_oz', String(p.weight_oz));
+                              if (p.length_in != null) setEF('length_in', String(p.length_in));
+                              if (p.width_in != null) setEF('width_in', String(p.width_in));
+                              if (p.height_in != null) setEF('height_in', String(p.height_in));
+                              setShowApplyPreset(false);
+                            }}
+                              className={`w-full px-3 py-2 text-left text-[13px] hover:bg-gray-50 transition-colors ${matched?.id === p.id ? 'bg-[#F0FDF4] text-[#15803d] font-medium' : 'text-gray-700'}`}>
+                              {p.brand} — {p.model}
+                              <span className="text-[11px] text-gray-400 ml-1.5">
+                                {[p.weight_oz && `${p.weight_oz}oz`, p.preset_supplies?.length && `${p.preset_supplies.length} supply`].filter(Boolean).join(' · ')}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <FormField label="Product Title" required><input className={inputCls} value={editForm.product_title} onChange={e => setEF('product_title', e.target.value)} /></FormField>
                 <div className="grid grid-cols-2 gap-3">
                   <FormField label="SKU"><input className={inputCls} value={editForm.sku} onChange={e => setEF('sku', e.target.value)} /></FormField>
@@ -839,22 +1225,51 @@ export function Inventory() {
                 </div>
                 <FormField label="Serial Number"><input className={inputCls} value={editForm.serial_number} onChange={e => setEF('serial_number', e.target.value)} /></FormField>
                 <div className="grid grid-cols-2 gap-3">
-                  <FormField label="Brand"><input className={inputCls} value={editForm.brand} onChange={e => setEF('brand', e.target.value)} /></FormField>
-                  <FormField label="Category"><input className={inputCls} value={editForm.category} onChange={e => setEF('category', e.target.value)} /></FormField>
+                  <FormField label="Brand">
+                    <input list="edit-brand-list" className={inputCls} value={editForm.brand ?? ''} onChange={e => setEF('brand', e.target.value)} />
+                    <datalist id="edit-brand-list">{distinctBrands.map((b: string) => <option key={b} value={b} />)}</datalist>
+                  </FormField>
+                  <FormField label="Category">
+                    <input list="edit-cat-list" className={inputCls} value={editForm.category ?? ''} onChange={e => setEF('category', e.target.value)} />
+                    <datalist id="edit-cat-list">{distinctCategories.map((c: string) => <option key={c} value={c} />)}</datalist>
+                  </FormField>
                 </div>
                 <FormField label="Model"><input className={inputCls} value={editForm.model} onChange={e => setEF('model', e.target.value)} /></FormField>
                 <div className="grid grid-cols-2 gap-3">
                   <FormField label="Grade">
-                    <select className={selectCls} value={editForm.grade} onChange={e => setEF('grade', e.target.value)}>{GRADES.map(g => <option key={g}>{g}</option>)}</select>
+                    <select className={selectCls} value={editForm.grade} onChange={e => { setEF('grade', e.target.value); calcEditAsk(editForm.msrp, e.target.value, editForm.condition); }}>{GRADES.map(g => <option key={g}>{g}</option>)}</select>
                   </FormField>
                   <FormField label="Status">
-                    <select className={selectCls} value={editForm.status} onChange={e => setEF('status', e.target.value)}>{INV_STATUSES.map(s => <option key={s}>{s}</option>)}</select>
+                    <select className={selectCls} value={editForm.status} onChange={e => setEF('status', e.target.value)}>
+                      {INV_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\w/g, c => c.toUpperCase())}</option>)}
+                    </select>
                   </FormField>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <FormField label="MSRP ($)"><input type="number" className={inputCls} value={editForm.msrp} onChange={e => setEF('msrp', e.target.value)} min="0" step="0.01" /></FormField>
+                  <FormField label="MSRP ($)"><input type="number" className={inputCls} value={editForm.msrp} onChange={e => { setEF('msrp', e.target.value); calcEditAsk(e.target.value, editForm.grade, editForm.condition); }} min="0" step="0.01" /></FormField>
                   <FormField label="Asking Price ($)"><input type="number" className={inputCls} value={editForm.current_asking_price} onChange={e => setEF('current_asking_price', e.target.value)} min="0" step="0.01" /></FormField>
-                  <FormField label="Acq. Cost ($)"><input type="number" className={inputCls} value={editForm.weighted_acquisition_cost} onChange={e => setEF('weighted_acquisition_cost', e.target.value)} min="0" step="0.01" /></FormField>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Acq. Cost ($)</label>
+                      <button type="button" onClick={async () => {
+                        const lot = lots.find((l: any) => l.id === editForm.lot_id);
+                        if (!lot) return;
+                        const landedCost = lot.manual_landed_cost_override != null
+                          ? Number(lot.manual_landed_cost_override)
+                          : (Number(lot.purchase_price || 0) + Number(lot.freight_cost || 0) + Number(lot.handling_cost || 0));
+                        if (landedCost <= 0) return;
+                        const msrp = parseFloat(editForm.msrp);
+                        const lotMsrp = Number(lot.total_msrp || 0);
+                        if (!isNaN(msrp) && msrp > 0 && lotMsrp > 0) {
+                          setEF('weighted_acquisition_cost', String(parseFloat(((msrp / lotMsrp) * landedCost).toFixed(2))));
+                        } else {
+                          const { count } = await supabase.from('inventory_items').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('lot_id', editForm.lot_id);
+                          setEF('weighted_acquisition_cost', String(parseFloat((landedCost / (count ?? 1)).toFixed(2))));
+                        }
+                      }} className="text-[10px] text-[#3ECF8E] hover:underline font-medium">Auto-calculate</button>
+                    </div>
+                    <input type="number" className={inputCls} value={editForm.weighted_acquisition_cost} onChange={e => setEF('weighted_acquisition_cost', e.target.value)} min="0" step="0.01" />
+                  </div>
                 </div>
                 <FormField label="Location">
                   <select className={selectCls} value={editForm.warehouse_location_id} onChange={e => setEF('warehouse_location_id', e.target.value)}>
@@ -868,7 +1283,12 @@ export function Inventory() {
                     {lots.map((l: any) => <option key={l.id} value={l.id}>#{l.lot_id ? l.lot_id.toUpperCase() : l.id.slice(0, 8).toUpperCase()}</option>)}
                   </select>
                 </FormField>
-                <FormField label="Condition"><textarea className={textareaCls} rows={2} value={editForm.condition} onChange={e => setEF('condition', e.target.value)} /></FormField>
+                <FormField label="Condition">
+                  <select className={selectCls} value={editForm.condition ?? ''} onChange={e => { setEF('condition', e.target.value); calcEditAsk(editForm.msrp, editForm.grade, e.target.value); }}>
+                    <option value="">— Select —</option>
+                    {CONDITIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
+                </FormField>
                 <FormField label="Notes"><textarea className={textareaCls} rows={2} value={editForm.notes} onChange={e => setEF('notes', e.target.value)} /></FormField>
                 <div>
                   <label className="text-[11px] font-medium text-gray-500 mb-2 block uppercase tracking-wide">Weight & Dimensions (for shipping)</label>
@@ -896,7 +1316,7 @@ export function Inventory() {
                 <DetailRow label="Brand" value={selected.brand} />
                 <DetailRow label="Category" value={selected.category} />
                 <DetailRow label="Model" value={selected.model} />
-                <DetailRow label="Condition" value={selected.condition} />
+                <DetailRow label="Condition" value={conditionLabel(selected.condition)} />
                 <DetailRow label="Grade" value={selected.grade} />
                 <DetailRow label="Status" value={<StatusBadge status={selected.status} size="sm" />} />
                 <DetailRow label="MSRP" value={selected.msrp != null ? `$${Number(selected.msrp).toFixed(2)}` : null} />
@@ -1062,6 +1482,15 @@ export function Inventory() {
           <InventoryLabel key={item.id} ref={(el: HTMLDivElement | null) => { batchRefs.current[i] = el; }} item={item} size={labelSize} orgLogo={currentOrg?.logo_url} qrUrl={qrUrlFor(item)} />
         ))}
       </div>
+      {showSavePreset && selected && (
+        <SavePresetModal
+          item={selected}
+          orgId={orgId}
+          existingPreset={presets?.find((p: any) => p.brand === selected.brand && p.model === selected.model)}
+          onClose={() => setShowSavePreset(false)}
+          onSaved={() => { setShowSavePreset(false); reload(); }}
+        />
+      )}
     </div>
   );
 }
