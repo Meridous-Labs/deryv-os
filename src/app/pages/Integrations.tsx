@@ -71,43 +71,54 @@ export function Integrations() {
   const getConnection = (id: string) => connections.find((c: any) => c.provider === id);
 
   const startOAuth = async (integration: typeof KNOWN_INTEGRATIONS[0], shopDomain?: string) => {
-    setWorking(integration.id);
-
     if (!orgId) {
       alert('Organization is still loading. Try again.');
-      setWorking(null);
       return;
     }
 
-    if (!user?.id) console.warn('Starting OAuth without user_id');
-
-    let payload: any = { return_path: '/integrations' };
-
-    if (integration.id === 'shopify') {
-      if (!shopDomain) {
-        setSetupDrawer({ provider: integration.id, name: integration.name, type: 'oauth_input' });
-        setWorking(null);
-        return;
-      }
-      payload.shop = shopDomain;
+    if (integration.id === 'shopify' && !shopDomain) {
+      setSetupDrawer({ provider: integration.id, name: integration.name, type: 'oauth_input' });
+      return;
     }
 
+    // Open blank window NOW (synchronous on click) — browsers block window.open after any await.
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Please allow popups for app.deryvos.com, then try again.');
+      return;
+    }
+    win.document.write(`<html><body style="font-family:sans-serif;padding:48px;color:#555;background:#f9fafb"><p style="font-size:15px">Connecting to ${integration.name}...</p></body></html>`);
+
+    setWorking(integration.id);
+    if (!user?.id) console.warn('Starting OAuth without user_id');
+
     try {
+      const payload: any = { return_path: '/integrations' };
+      if (shopDomain) payload.shop = shopDomain;
+
       const { data, error } = await supabase.functions.invoke('integration-start', {
         body: { organization_id: orgId, user_id: user?.id, provider: integration.id, payload },
       });
 
-      if (error) { alert(`Failed to start OAuth: ${error.message || 'Unknown error'}`); setWorking(null); return; }
-      if (data?.error) { alert(`Failed to start OAuth: ${data.error}`); setWorking(null); return; }
-      if (data?.oauth_url) {
-        await logActivity(orgId!, user?.id!, `Started ${integration.name} OAuth`, 'integration_connections');
-        window.location.href = data.oauth_url;
+      if (error || data?.error) {
+        win.close();
+        alert(`Failed to start OAuth: ${error?.message ?? data?.error ?? 'Unknown error'}`);
+        setWorking(null);
         return;
       }
 
+      if (data?.oauth_url) {
+        await logActivity(orgId!, user?.id!, `Started ${integration.name} OAuth`, 'integration_connections');
+        win.location.href = data.oauth_url;
+        setWorking(null);
+        return;
+      }
+
+      win.close();
       alert('OAuth URL was not returned by integration-start.');
       setWorking(null);
     } catch (err: any) {
+      win.close();
       alert(`Failed to start OAuth: ${err.message || 'Unknown error'}`);
       setWorking(null);
     }
