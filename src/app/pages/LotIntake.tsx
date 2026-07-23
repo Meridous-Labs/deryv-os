@@ -16,6 +16,25 @@ import { FilterBar, FilterValues, FilterDef } from '../components/FilterBar';
 const LOT_STATUSES = ['PURCHASED', 'IN_TRANSIT', 'ARRIVED', 'PROCESSING', 'ACTIVE', 'PARTIAL', 'CLOSED'];
 const ALL_LOT_STATUSES = [...LOT_STATUSES, 'ARCHIVED'];
 
+// Restored from the initial working implementation (commit 6ec0e20); these
+// definitions were dropped by 39cc4c9 ("Updated After A Long Break") while their
+// call sites remained, causing a ReferenceError on the Lot Intake page.
+function fmt(val: any, prefix = '') {
+  if (val === null || val === undefined || val === '') return null;
+  const n = Number(val);
+  if (!isNaN(n)) return `${prefix}${n.toLocaleString()}`;
+  return String(val);
+}
+
+function fmtMoney(val: any) {
+  if (val === null || val === undefined || val === '') return null;
+  const n = Number(val);
+  if (isNaN(n)) return null;
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+const LOT_SELECT = 'id, lot_id, status, total_msrp, recovery_amount, purchase_date, arrival_date, vendor_id, funding_partner_id, purchase_price, freight_cost, handling_cost, manual_landed_cost_override, truckload_number, pallet_count, liquidation_source, notes, created_at, vendors(name), funding_partners:partners!lots_funding_partner_id_fkey(company_name)';
+
 function NewLotModal({ open, onClose, orgId, userId, vendors, partners, onCreated }: any) {
   const [form, setForm] = useState({
     status: 'PURCHASED',
