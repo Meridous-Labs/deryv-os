@@ -178,6 +178,92 @@ function CreateShipmentModal({ open, onClose, orgId, userId, orders, onCreated }
     setSaving(false); onCreated(); onClose(); reset();
   };
 
+  return (
+    <Modal open={open} onClose={onClose} title="Create Shipment"
+      footer={<>
+        <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
+        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+          {saving && <Loader2 size={12} className="animate-spin" />}Create Shipment
+        </button>
+      </>}>
+      <div className="space-y-4">
+        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+
+        <FormField label="Order" required>
+          <select className={selectCls} value={form.order_id} onChange={e => set('order_id', e.target.value)}>
+            <option value="">— Select order —</option>
+            {orders.map((o: any) => (
+              <option key={o.id} value={o.id}>
+                {o.order_id ? `#${o.order_id}` : `#${o.id.slice(0, 8).toUpperCase()}`}
+                {o.buyer_name ? ` — ${o.buyer_name}` : ''}
+              </option>
+            ))}
+          </select>
+        </FormField>
+
+        {/* Package dimensions */}
+        <FormField label="Fulfillment Type" required>
+          <select className={selectCls} value={form.fulfillment_type} onChange={e => set('fulfillment_type', e.target.value)}>
+            <option value="SHIP">Ship — Carrier Label</option>
+            <option value="LOCAL_PICKUP">Local Pickup</option>
+            <option value="BUYER_ARRANGED">Buyer Arranged Shipping</option>
+          </select>
+        </FormField>
+
+        {form.fulfillment_type === 'SHIP' && (
+        <div>
+          <label className="text-[11px] font-medium text-gray-500 mb-2 block uppercase tracking-wide">Package Dimensions (optional — required for rates)</label>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Weight (oz)">
+              <input type="number" className={inputCls} value={form.weight_oz} onChange={e => set('weight_oz', e.target.value)} placeholder="16" min="0" step="0.1" />
+            </FormField>
+            <FormField label="Length (in)">
+              <input type="number" className={inputCls} value={form.length_in} onChange={e => set('length_in', e.target.value)} placeholder="12" min="0" step="0.1" />
+            </FormField>
+            <FormField label="Width (in)">
+              <input type="number" className={inputCls} value={form.width_in} onChange={e => set('width_in', e.target.value)} placeholder="8" min="0" step="0.1" />
+            </FormField>
+            <FormField label="Height (in)">
+              <input type="number" className={inputCls} value={form.height_in} onChange={e => set('height_in', e.target.value)} placeholder="4" min="0" step="0.1" />
+            </FormField>
+          </div>
+        </div>
+        )}
+
+        <FormField label="Notes">
+          <textarea className={textareaCls} rows={2} value={form.shipment_notes} onChange={e => set('shipment_notes', e.target.value)} placeholder="Optional notes..." />
+        </FormField>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Shipment Drawer ───────────────────────────────────────────────────────────
+
+function ShipmentDrawer({ shipment, onClose, orgId, userId, role, onUpdated }: any) {
+  const navigate = useNavigate();
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    carrier: shipment.carrier ?? '',
+    service: shipment.service ?? '',
+    tracking_number: shipment.tracking_number ?? '',
+    status: shipment.status,
+    estimated_delivery: shipment.estimated_delivery ?? '',
+    weight_oz: shipment.weight_oz != null ? String(shipment.weight_oz) : '',
+    length_in: shipment.length_in != null ? String(shipment.length_in) : '',
+    width_in: shipment.width_in != null ? String(shipment.width_in) : '',
+    height_in: shipment.height_in != null ? String(shipment.height_in) : '',
+    shipment_notes: shipment.shipment_notes ?? '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<null | 'deliver' | 'delete'>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [rates, setRates] = useState<any[]>([]);
+  const [loadingRates, setLoadingRates] = useState(false);
+  const [creatingLabel, setCreatingLabel] = useState(false);
+  const [showRates, setShowRates] = useState(false);
+  const set = (k: string, v: string) => setEditForm(f => ({ ...f, [k]: v }));
 
   const orderNum = shipment.orders
     ? (shipment.orders.order_id ? `#${shipment.orders.order_id}` : `#${shipment.orders.id?.slice(0, 8).toUpperCase()}`)
