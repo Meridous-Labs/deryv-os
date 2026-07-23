@@ -102,6 +102,78 @@ function NewLotModal({ open, onClose, orgId, userId, vendors, partners, onCreate
     handleClose();
   };
 
+  // JSX restored from the authoritative working implementation (commit 6ec0e20);
+  // the form body was dropped by 39cc4c9 while this component was still rendered.
+  return (
+    <Modal open={open} onClose={handleClose} title="New LOT" width="max-w-2xl"
+      footer={<>
+        <button onClick={handleClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
+        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+          {saving && <Loader2 size={12} className="animate-spin" />}Create LOT
+        </button>
+      </>}>
+      <div className="space-y-4">
+        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="Status">
+            <select className={selectCls} value={form.status} onChange={e => set('status', e.target.value)}>
+              {LOT_STATUSES.map(s => <option key={s}>{s}</option>)}
+            </select>
+          </FormField>
+          <FormField label="Total MSRP ($)">
+            <input type="number" className={inputCls} value={form.total_msrp} onChange={e => set('total_msrp', e.target.value)} placeholder="0.00" min="0" step="0.01" />
+          </FormField>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="Purchase Date">
+            <input type="date" className={inputCls} value={form.purchase_date} onChange={e => set('purchase_date', e.target.value)} />
+          </FormField>
+          <FormField label="Arrival Date">
+            <input type="date" className={inputCls} value={form.arrival_date} onChange={e => set('arrival_date', e.target.value)} />
+          </FormField>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="Vendor">
+            <select className={selectCls} value={form.vendor_id} onChange={e => set('vendor_id', e.target.value)}>
+              <option value="">— No vendor —</option>
+              {vendors.map((v: any) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          </FormField>
+          <FormField label="Funding Partner">
+            <select className={selectCls} value={form.funding_partner_id} onChange={e => set('funding_partner_id', e.target.value)}>
+              <option value="">— No partner —</option>
+              {partners.map((p: any) => <option key={p.id} value={p.id}>{p.company_name ?? p.name}</option>)}
+            </select>
+          </FormField>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <FormField label="Purchase Price ($)">
+            <input type="number" className={inputCls} value={form.purchase_price} onChange={e => set('purchase_price', e.target.value)} placeholder="0.00" min="0" step="0.01" />
+          </FormField>
+          <FormField label="Freight Cost ($)">
+            <input type="number" className={inputCls} value={form.freight_cost} onChange={e => set('freight_cost', e.target.value)} placeholder="0.00" min="0" step="0.01" />
+          </FormField>
+          <FormField label="Handling Cost ($)">
+            <input type="number" className={inputCls} value={form.handling_cost} onChange={e => set('handling_cost', e.target.value)} placeholder="0.00" min="0" step="0.01" />
+          </FormField>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <FormField label="Truckload #">
+            <input type="text" className={inputCls} value={form.truckload_number} onChange={e => set('truckload_number', e.target.value)} placeholder="TL-001" />
+          </FormField>
+          <FormField label="Pallet Count">
+            <input type="number" className={inputCls} value={form.pallet_count} onChange={e => set('pallet_count', e.target.value)} placeholder="0" min="0" />
+          </FormField>
+          <FormField label="Liquidation Source">
+            <input type="text" className={inputCls} value={form.liquidation_source} onChange={e => set('liquidation_source', e.target.value)} placeholder="e.g. B-Stock" />
+          </FormField>
+        </div>
+        <FormField label="Notes">
+          <textarea className={textareaCls} rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Optional notes..." />
+        </FormField>
+      </div>
+    </Modal>
+  );
 }
 
 // ── Sort helper ────────────────────────────────────────────────────────────────
