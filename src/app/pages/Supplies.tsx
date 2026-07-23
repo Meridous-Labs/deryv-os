@@ -775,7 +775,7 @@ function UsageView({ orgId, userId, role }: { orgId: string | null; userId: stri
 
   const { data: usageLogs, loading, error, reload } = useOrgQuery<any>('supply_usage_logs', orgId, {
     select: '*, supply:supplies(name, unit_of_measure, unit_cost), inventory_items(product_title), orders(order_id), shipments(tracking_number, shipment_id)',
-    orderBy: 'created_at', ascending: false,
+    orderBy: 'used_at', ascending: false,
   });
   const { data: supplies } = useOrgQuery<any>('supplies', orgId, {
     select: 'id, name, unit_of_measure, unit_cost, quantity_on_hand, reorder_point',
