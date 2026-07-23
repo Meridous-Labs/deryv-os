@@ -175,6 +175,27 @@ function SavePresetModal({ item, orgId, existingPreset, onClose, onSaved }: any)
 
 function AddInventoryModal({ open, onClose, orgId, userId, lots, locations, onCreated, distinctBrands = [], distinctCategories = [], presets = [], pricingPresets = [] }: any) {
 
+  // State block restored (WP-A). These declarations were removed by 39cc4c9 while
+  // the component body and references were left intact, causing
+  // "saving is not defined" on render. Field defaults match the current form
+  // inputs and save/reset logic; the WAC/preset states are inferred from their
+  // call sites (setWacSource('MSRP-weighted'|'LOT average'|null), etc.).
+  const emptyForm = {
+    product_title: '', sku: '', upc: '', serial_number: '', brand: '', model: '', category: '',
+    condition: '', grade: '', status: 'Unprocessed',
+    msrp: '', current_asking_price: '', weighted_acquisition_cost: '',
+    lot_id: '', warehouse_location_id: '', notes: '',
+    weight_oz: '', length_in: '', width_in: '', height_in: '',
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [wacSource, setWacSource] = useState<string | null>(null);
+  const [askSource, setAskSource] = useState<string | null>(null);
+  const [presetApplied, setPresetApplied] = useState<string | null>(null);
+  const [calcingWac, setCalcingWac] = useState(false);
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
   const reset = () => { setForm(emptyForm); setWacSource(null); setAskSource(null); setPresetApplied(null); };
 
   // ── WAC calculation ──────────────────────────────────────────────────────
