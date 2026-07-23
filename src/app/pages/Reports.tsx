@@ -46,6 +46,29 @@ function NewReportModal({ open, onClose, orgId, userId, currentFilters, onCreate
     setForm({ name: '', report_type: 'Recovery', schedule: 'Manual' });
   };
 
+  return (
+    <Modal open={open} onClose={onClose} title="New Report"
+      footer={<>
+        <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 border border-[rgba(0,0,0,0.1)] rounded-lg hover:bg-gray-50">Cancel</button>
+        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+          {saving && <Loader2 size={12} className="animate-spin" />}Create Report
+        </button>
+      </>}>
+      <div className="space-y-4">
+        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+        <FormField label="Report Name" required><input className={inputCls} value={form.name} onChange={e => set('name', e.target.value)} placeholder="Monthly Recovery Report" /></FormField>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="Type"><select className={selectCls} value={form.report_type} onChange={e => set('report_type', e.target.value)}>{REPORT_TYPES.map(t => <option key={t}>{t}</option>)}</select></FormField>
+          <FormField label="Schedule"><select className={selectCls} value={form.schedule} onChange={e => set('schedule', e.target.value)}>{SCHEDULES.map(s => <option key={s}>{s}</option>)}</select></FormField>
+        </div>
+        {Object.keys(currentFilters || {}).length > 0 && (
+          <div className="text-[11px] text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
+            Current filters will be saved with this report
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
 }
 
 // ── Sort helper ────────────────────────────────────────────────────────────────
@@ -60,6 +83,115 @@ function sortItems(items: any[], col: string | null, dir: 'asc' | 'desc', getVal
     if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
     return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
   });
+}
+
+function ReportDrawer({ report, onClose, orgId, userId, onUpdated, onDeleted }: any) {
+  const [running, setRunning] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRun = async () => {
+    setRunning(true); setError(null);
+    const { error: err } = await updateRow('reports', report.id, {
+      last_run_at: new Date().toISOString(),
+    });
+    if (err) {
+      setError(err);
+      setRunning(false);
+      return;
+    }
+    await logActivity(orgId, userId, `Report "${report.name}" run`, 'reports', report.id);
+    setRunning(false);
+    onUpdated();
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    await deleteRow('reports', report.id);
+    await logActivity(orgId, userId, `Report "${report.name}" deleted`, 'reports', report.id);
+    setDeleting(false);
+    setConfirmDelete(false);
+    onDeleted();
+    onClose();
+  };
+
+  const handleDownloadPDF = () => {
+    if (report.pdf_url) {
+      window.open(report.pdf_url, '_blank');
+    }
+  };
+
+  const handleExportCSV = () => {
+    // Generate CSV based on report type and filters
+    const csvContent = `Report: ${report.name}\nType: ${report.report_type}\nGenerated: ${new Date().toLocaleString()}\n\n`;
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${report.name.replace(/\s+/g, '_')}_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <>
+      <Drawer
+        open
+        onClose={onClose}
+        title={report.name}
+        subtitle={`${report.report_type} Report`}
+        footer={
+          <div className="flex items-center gap-2">
+            <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 px-3 py-2 text-[13px] text-red-500 border border-red-200 rounded-lg hover:bg-red-50">
+              <Trash2 size={13} />Delete
+            </button>
+            <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-3 py-2 border border-[rgba(0,0,0,0.1)] text-[13px] text-gray-600 rounded-lg hover:bg-gray-50">
+              <Download size={13} />Export CSV
+            </button>
+            {report.pdf_url && (
+              <button onClick={handleDownloadPDF} className="flex items-center gap-1.5 px-3 py-2 border border-[rgba(0,0,0,0.1)] text-[13px] text-gray-600 rounded-lg hover:bg-gray-50">
+                <FileText size={13} />Download PDF
+              </button>
+            )}
+            <button onClick={handleRun} disabled={running} className="flex items-center gap-1.5 px-4 py-2 bg-[#3ECF8E] hover:bg-[#38c484] text-white text-[13px] font-medium rounded-lg disabled:opacity-60">
+              {running ? <Loader2 size={13} className="animate-spin" /> : <PlayCircle size={13} />}Run Report
+            </button>
+          </div>
+        }
+      >
+        {error && <p className="text-[12px] text-red-500 bg-red-50 px-3 py-2 rounded-lg mb-4">{error}</p>}
+        <div>
+          <DetailRow label="Report Name" value={report.name} />
+          <DetailRow label="Type" value={report.report_type} />
+          <DetailRow label="Schedule" value={report.schedule} />
+          <DetailRow label="Last Run" value={report.last_run_at ? new Date(report.last_run_at).toLocaleString() : 'Never'} />
+          <DetailRow label="Created" value={new Date(report.created_at).toLocaleDateString()} />
+          {report.filters && Object.keys(report.filters).length > 0 && (
+            <DetailRow label="Filters" value={
+              <div className="text-[11px] text-gray-600 space-y-1">
+                {Object.entries(report.filters).map(([key, value]) => (
+                  <div key={key}>{key}: {String(value)}</div>
+                ))}
+              </div>
+            } />
+          )}
+          {report.pdf_url && <DetailRow label="PDF URL" value={<a href={report.pdf_url} target="_blank" rel="noopener noreferrer" className="text-[#3ECF8E] hover:underline text-[11px]">{report.pdf_url}</a>} />}
+        </div>
+      </Drawer>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete Report"
+        description={`Delete report "${report.name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+        loading={deleting}
+      />
+    </>
+  );
 }
 export function Reports() {
   const view = useSecondaryView();
