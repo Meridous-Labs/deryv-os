@@ -499,19 +499,19 @@ export function Inventory() {
     if (Object.keys(updates).length > 0) {
       await supabase.from('inventory_items').update(updates).eq('id', selected.id);
     }
-    // Create supply transactions
+    // Record supply consumption attributed to this inventory item (canonical: supply_usage_logs)
     if (preset.preset_supplies?.length) {
-      const txns = preset.preset_supplies.map((ps: any) => ({
+      const usageLogs = preset.preset_supplies.map((ps: any) => ({
         organization_id: orgId,
         supply_id: ps.supply_id,
-        transaction_type: 'USE',
-        quantity: -Math.abs(ps.quantity),
-        unit_cost: ps.supplies?.unit_cost ?? null,
-        total_cost: ps.supplies?.unit_cost != null ? parseFloat((ps.supplies.unit_cost * ps.quantity).toFixed(2)) : null,
         inventory_item_id: selected.id,
+        quantity_used: Math.abs(ps.quantity),
+        unit_cost_at_use: ps.supplies?.unit_cost ?? null,
+        total_cost: ps.supplies?.unit_cost != null ? parseFloat((ps.supplies.unit_cost * Math.abs(ps.quantity)).toFixed(2)) : null,
+        used_by: user?.id ?? null,
         notes: 'Applied from product preset',
       }));
-      await supabase.from('supply_transactions').insert(txns);
+      await supabase.from('supply_usage_logs').insert(usageLogs);
     }
     await reload();
   };

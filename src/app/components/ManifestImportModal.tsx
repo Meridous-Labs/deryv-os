@@ -555,26 +555,26 @@ export function ManifestImportModal({ open, onClose, orgId, userId, vendors, par
         });
       }
 
-      // Create supply usage transactions for preset-matched items
-      const supplyTxns: any[] = [];
+      // Record supply consumption attributed to each inventory item (canonical: supply_usage_logs)
+      const usageLogs: any[] = [];
       for (const { id: itemId, _preset_id } of insertedItems) {
         if (!_preset_id || !presetSuppliesMap[_preset_id]) continue;
         for (const ps of presetSuppliesMap[_preset_id]) {
           const unitCost = ps.supplies?.unit_cost ?? null;
-          supplyTxns.push({
+          usageLogs.push({
             organization_id:   orgId!,
             supply_id:         ps.supply_id,
-            transaction_type:  'USE',
-            quantity:          -Math.abs(ps.quantity),
-            unit_cost:         unitCost,
-            total_cost:        unitCost != null ? parseFloat((unitCost * ps.quantity).toFixed(2)) : null,
             inventory_item_id: itemId,
+            quantity_used:     Math.abs(ps.quantity),
+            unit_cost_at_use:  unitCost,
+            total_cost:        unitCost != null ? parseFloat((unitCost * Math.abs(ps.quantity)).toFixed(2)) : null,
+            used_by:           userId ?? null,
             notes:             'Auto-applied from product preset',
           });
         }
       }
-      if (supplyTxns.length > 0) {
-        await supabase.from('supply_transactions').insert(supplyTxns);
+      if (usageLogs.length > 0) {
+        await supabase.from('supply_usage_logs').insert(usageLogs);
       }
 
       // best-effort record — don't block if schema differs
