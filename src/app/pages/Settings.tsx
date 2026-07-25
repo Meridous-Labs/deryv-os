@@ -68,6 +68,17 @@ function InviteMemberModal({ open, onClose, orgId, userId, onCreated }: any) {
   );
 }
 
+// Mirrors applyPricingRule in Inventory.tsx — keep the two in sync.
+function applyPricingRuleCalc(msrp: number, rule: { mode: string; value: number | string } | null): number | null {
+  if (!rule || !rule.value || !msrp || msrp <= 0) return null;
+  const v = Number(rule.value); // coerce string from DB to number
+  if (!v || isNaN(v)) return null;
+  if (rule.mode === 'pct') return parseFloat((msrp * v / 100).toFixed(2));
+  if (rule.mode === 'add') return parseFloat((msrp + v).toFixed(2));
+  if (rule.mode === 'sub') return parseFloat(Math.max(0, msrp - v).toFixed(2));
+  return null;
+}
+
 function findBestPricingRule(pricingRules: any[], grade: string | null, condition: string | null): any | null {
   if (!pricingRules?.length) return null;
   // Grade+Condition → Grade only → Condition only → Default
